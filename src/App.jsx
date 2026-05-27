@@ -165,9 +165,9 @@ export default function App() {
               {[
                 { id: "carrito", label: "Traigo el link del carrito", sub: "Generaste el carrito en el sitio" },
                 { id: "urls", label: "Traigo las URLs", sub: "Pegás los links de cada producto" },
-                { id: "auto", label: "Claude navega el sitio", sub: "Le das el rango y elige solo" },
+                { id: "auto", label: "Claude navega el sitio", sub: "Próximamente — usá carrito o URLs por ahora" },
               ].map(m => (
-                <button key={m.id} style={{ ...s.modeBtn, background: form.seleccion === m.id ? '#111' : '#fff', color: form.seleccion === m.id ? '#fff' : '#111', border: `2px solid ${form.seleccion === m.id ? '#111' : '#e8e8e8'}` }} onClick={() => update('seleccion', m.id)}>
+                <button key={m.id} style={{ ...s.modeBtn, background: form.seleccion === m.id ? '#111' : '#fff', color: form.seleccion === m.id ? '#fff' : m.id === 'auto' ? '#ccc' : '#111', border: `2px solid ${form.seleccion === m.id ? '#111' : '#e8e8e8'}`, opacity: m.id === 'auto' ? 0.5 : 1, cursor: m.id === 'auto' ? 'not-allowed' : 'pointer' }} onClick={() => m.id !== 'auto' && update('seleccion', m.id)}>
                   <span style={{ fontSize: 14, fontWeight: 700, display: 'block', marginBottom: 2 }}>{m.label}</span>
                   <span style={{ fontSize: 12, opacity: 0.7 }}>{m.sub}</span>
                 </button>
