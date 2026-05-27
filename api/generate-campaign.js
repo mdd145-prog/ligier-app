@@ -1,5 +1,19 @@
 export const config = { maxDuration: 60 };
 
+
+async function fetchWithTimeout(url, options = {}, timeout = 8000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(id);
+    return res;
+  } catch(e) {
+    clearTimeout(id);
+    throw e;
+  }
+}
+
 const TEMPLATES = {
   'vinos':        'base-email-vinos.html',
   'whisky':       'base-email-whisky.html',
@@ -29,9 +43,9 @@ async function fetchGuidelines() {
 
 async function fetchProductData(url) {
   try {
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' }
-    });
+    }, 6000);
     const html = await res.text();
     const jsonLdMatches = [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)];
     for (const match of jsonLdMatches) {
