@@ -208,13 +208,14 @@ export default async function handler(req, res) {
       try {
         const cartRes = await fetchWithTimeout(cartLink, { headers: { 'User-Agent': 'Mozilla/5.0' } }, 8000);
         const cartHtml = await cartRes.text();
-        const totals = cartHtml.match(/\$[\d]{2,3}(?:\.[\d]{3})+/g);
-        cartTotal = totals ? totals[totals.length - 1] : null;
-        if (!cartTotal) {
-          const cartRes2 = await fetchWithTimeout(cartLink, { headers: { 'User-Agent': 'Mozilla/5.0' } }, 8000);
-          const cartHtml2 = await cartRes2.text();
-          const totals2 = cartHtml2.match(/\$[\d]{2,3}(?:\.[\d]{3})+/g);
-          cartTotal = totals2 ? totals2[totals2.length - 1] : null;
+        // Extract grand total from Magento cart: <tr class="grand totals"> > <span class="price">
+        const grandTotal = cartHtml.match(/class="grand totals"[\s\S]*?class="price"[^>]*>([^<]+)<\/span>/);
+        if (grandTotal) {
+          cartTotal = grandTotal[1].trim();
+        } else {
+          // Fallback: last price on the page
+          const allPrices = cartHtml.match(/\$[\d]{2,3}(?:\.[\d]{3})+/g);
+          cartTotal = allPrices ? allPrices[allPrices.length - 1] : null;
         }
       } catch(e) {}
     }
