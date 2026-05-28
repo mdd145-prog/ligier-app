@@ -14,6 +14,65 @@ async function fetchWithTimeout(url, options = {}, timeout = 8000) {
   }
 }
 
+
+async function getMagentoProduct(sku) {
+  const baseUrl = process.env.MAGENTO_BASE_URL;
+  const token = process.env.MAGENTO_ACCESS_TOKEN;
+  try {
+    const res = await fetchWithTimeout(
+      `${baseUrl}/rest/V1/products/${encodeURIComponent(sku)}`,
+      { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } },
+      8000
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    
+    // Extract price
+    const price = data.price;
+    
+    // Extract image
+    const mediaAttr = data.custom_attributes?.find(a => a.attribute_code === 'image');
+    const image = mediaAttr ? `${baseUrl}/media/catalog/product${mediaAttr.value}` : 
+                  data.media_gallery_entries?.[0] ? `${baseUrl}/media/catalog/product${data.media_gallery_entries[0].file}` : null;
+    
+    // Extract description
+    const descAttr = data.custom_attributes?.find(a => a.attribute_code === 'short_description' || a.attribute_code === 'description');
+    const description = descAttr ? descAttr.value.replace(/<[^>]+>/g, '').trim().slice(0, 250) : '';
+    
+    // Product URL
+    const urlAttr = data.custom_attributes?.find(a => a.attribute_code === 'url_key');
+    const productUrl = urlAttr ? `${baseUrl}/${urlAttr.value}.html` : `${baseUrl}/catalogsearch/result/?q=${sku}`;
+    
+    return {
+      sku,
+      name: data.name,
+      price: price ? parseFloat(price).toLocaleString('es-AR') : null,
+      image,
+      description,
+      url: productUrl,
+      inStock: data.status === 1
+    };
+  } catch(e) {
+    console.error('Magento product error:', sku, e.message);
+    return null;
+  }
+}
+
+async function getCartPriceRules() {
+  const baseUrl = process.env.MAGENTO_BASE_URL;
+  const token = process.env.MAGENTO_ACCESS_TOKEN;
+  try {
+    const res = await fetchWithTimeout(
+      `${baseUrl}/rest/V1/salesRules/search?searchCriteria[filter_groups][0][filters][0][field]=is_active&searchCriteria[filter_groups][0][filters][0][value]=1`,
+      { headers: { 'Authorization': `Bearer ${token}` } },
+      5000
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.items || [];
+  } catch(e) { return []; }
+}
+
 const TEMPLATES = {
   'vinos':        'base-email-vinos.html',
   'whisky':       'base-email-whisky.html',
@@ -121,24 +180,30 @@ export default async function handler(req, res) {
     let productUrls = [];
     let cartLink = carrito?.trim();
 
+    let skuList = [];
     if (seleccion === 'carrito' && cartLink) {
       const base64 = cartLink.split('/data/')[1]?.replace(/\/$/, '');
       if (base64) {
         try {
-          const skus = JSON.parse(Buffer.from(base64, 'base64').toString());
-          const found = await Promise.all(skus.map(s => findProductBySku(s.sku)));
-          productUrls = found.filter(Boolean);
-        } catch(e) { console.error('Cart decode:', e.message); }
+          skuList = JSON.parse(Buffer.from(base64, 'base64').toString());
+        } catch(e) {}
       }
     } else if (seleccion === 'urls' && urls) {
       productUrls = urls.split('\n').map(u => u.trim()).filter(u => u.startsWith('http')).slice(0, 10);
     }
 
-    // ── Step 3: Fetch product details ──
+    // Fetch product data via Magento API (fast — no page scraping)
     let productsData = [];
-    if (productUrls.length > 0) {
-      productsData = await Promise.all(productUrls.map(fetchProductData));
+    if (skuList.length > 0) {
+      const results = await Promise.all(skuList.map(s => getMagentoProduct(s.sku)));
+      productsData = results.filter(Boolean);
+    } else if (productUrls.length > 0) {
+      productsData = await Promise.all(productUrls.slice(0, 6).map(fetchProductData));
     }
+    
+    // Get active promotions
+    const promos = await getCartPriceRules();
+    const activePromos = promos.slice(0, 3).map(p => `- ${p.name}: ${p.description || p.discount_amount + '% off'}`).join('\n');
 
     // ── Step 4: Get cart total ──
     let cartTotal = null;
@@ -148,9 +213,20 @@ export default async function handler(req, res) {
     }
 
     // ── Step 5: Build Claude prompt ──
-    const productsSection = productsData.length > 0
-      ? productsData.map((p, i) => `PRODUCTO ${i+1}:\n  Nombre: ${p.name || 'N/D'}\n  URL: ${p.url}\n  Precio: ${p.price ? '$' + p.price : 'ver sitio'}\n  Imagen: ${p.image || ''}\n  Descripción: ${p.description || ''}`).join('\n\n')
-      : `Tipo: ${tipo}${rango ? ', rango $' + rango : ''}. Seleccioná productos navegando https://vinotecaligier.com/${tipo}`;
+    let productsSection = '';
+    if (productsData.length > 0) {
+      productsSection = productsData.map((p, i) => `PRODUCTO ${i+1}:
+  Nombre: ${p.name || 'N/D'}
+  URL: ${p.url}
+  Precio: $${p.price || 'ver sitio'}
+  Imagen: ${p.image || ''}
+  Descripción: ${p.description || ''}
+  En stock: ${p.inStock ? 'Sí' : 'No'}`).join('\n\n');
+    } else {
+      productsSection = `Tipo: ${tipo}${rango ? ', rango $' + rango : ''}. Seleccioná productos de https://vinotecaligier.com/${tipo}`;
+    }
+    
+    const promosSection = activePromos ? `\nPROMOCIONES ACTIVAS:\n${activePromos}` : '';
 
     const systemPrompt = `Sos el generador de emails de Vinoteca Ligier.
 Se te da un template HTML aprobado y datos de productos/campaña.
@@ -166,6 +242,7 @@ MES: ${mes}
 ${rango ? `RANGO: $${rango}` : ''}
 ${notas ? `NOTAS: ${notas}` : ''}
 LINK CARRITO: ${cartLink || 'generar con los SKUs de los productos'}
+${promosSection}
 TOTAL 6x5 DEL CARRITO: ${cartTotal || 'obtener navegando el link del carrito'}
 
 PRODUCTOS:
