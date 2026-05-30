@@ -130,12 +130,11 @@ function injectProductsIntoTemplate(template, products, cartLink, cartTotal, tip
     `$1${tipo.toUpperCase().replace('-', ' ')} · ${monthYear}$3`
   );
 
-  // 2. Update hero H1 with rotating title
-  const titles = HERO_TITLES[tipo] || HERO_TITLES['vinos'];
-  const title = titles[new Date().getDate() % titles.length];
+  // 2. Update hero H1 with selected title
+  const title = titulo ? titulo.replace(/\n/g, '<br>') : (HERO_TITLES[tipo] || HERO_TITLES['vinos'])[0].replace(/\n/g, '<br>');
   result = result.replace(
-    /(<h1[^>]*>)[^<]*(<br>[^<]*)*(<\/h1>)/,
-    `$1${title}$3`
+    /(<h1[^>]*>)[\s\S]*?(<\/h1>)/,
+    `<h1 class="hero-h1" style="font-size:34px; font-weight:700; letter-spacing:-1px; color:#ffffff; margin:0 0 16px 0; line-height:1.15;">${title}</h1>`
   );
 
   // 3. Replace products section
@@ -167,7 +166,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { tipo, seleccion, carrito, urls, rango, dia, hora, notas } = req.body;
+  const { tipo, seleccion, carrito, urls, rango, dia, hora, notas, titulo, accesorio, accesorioUrl, tienePromo, modo, emailPrueba } = req.body;
   const mes = new Date().toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
 
   try {
@@ -260,33 +259,37 @@ export default async function handler(req, res) {
     });
 
     // Send test email
+    const testEmail = emailPrueba || 'dayanmartin@gmail.com';
     await fetch(`${mcBase}/campaigns/${campaign.id}/actions/test`, {
       method: 'POST', headers: mcHeaders,
-      body: JSON.stringify({ test_emails: ['dayanmartin@gmail.com'], send_type: 'html' })
+      body: JSON.stringify({ test_emails: [testEmail], send_type: 'html' })
     });
 
-    // Schedule
-    const diasMap = { Lunes:1, Martes:2, Miércoles:3, Jueves:4, Viernes:5, Sábado:6, Domingo:0 };
-    const today = new Date();
-    const targetDay = diasMap[dia] ?? 3;
-    let daysUntil = (targetDay - today.getDay() + 7) % 7 || 7;
-    const sendDate = new Date(today);
-    sendDate.setDate(today.getDate() + daysUntil);
-    const [h, m] = (hora || '10:30').split(':');
-    sendDate.setHours(parseInt(h), parseInt(m), 0, 0);
-    const utcDate = new Date(sendDate.getTime() + 3 * 60 * 60 * 1000);
-    const scheduleTime = utcDate.toISOString().replace('.000Z', '+00:00');
-
-    await fetch(`${mcBase}/campaigns/${campaign.id}/actions/schedule`, {
-      method: 'POST', headers: mcHeaders,
-      body: JSON.stringify({ schedule_time: scheduleTime })
-    });
+    let scheduleTime = null;
+    if (modo !== 'borrador') {
+      const diasMap = { Lunes:1, Martes:2, Miércoles:3, Jueves:4, Viernes:5, Sábado:6, Domingo:0 };
+      const today = new Date();
+      const targetDay = diasMap[dia] ?? 3;
+      let daysUntil = (targetDay - today.getDay() + 7) % 7 || 7;
+      const sendDate = new Date(today);
+      sendDate.setDate(today.getDate() + daysUntil);
+      const [h, m] = (hora || '10:30').split(':');
+      sendDate.setHours(parseInt(h), parseInt(m), 0, 0);
+      const utcDate = new Date(sendDate.getTime() + 3 * 60 * 60 * 1000);
+      scheduleTime = utcDate.toISOString().replace('.000Z', '+00:00');
+      await fetch(`${mcBase}/campaigns/${campaign.id}/actions/schedule`, {
+        method: 'POST', headers: mcHeaders,
+        body: JSON.stringify({ schedule_time: scheduleTime })
+      });
+    }
 
     return res.status(200).json({
       success: true,
       campaignId: campaign.id,
       campaignName: campaignTitle,
       scheduleTime,
+      isDraft: modo === 'borrador',
+      testEmail,
       webId: campaign.web_id,
       productsFound: products.length,
       mailchimpUrl: `https://mc.us1.mailchimp.com/campaigns/show?id=${campaign.web_id}`
