@@ -1,46 +1,138 @@
 import { useState } from "react";
 
 const TIPOS = [
-  { id: "vinos", label: "Vinos", icon: "🍷", url: "https://vinotecaligier.com/vino" },
-  { id: "whisky", label: "Whisky", icon: "🥃", url: "https://vinotecaligier.com/whisky" },
-  { id: "espirituosas", label: "Espirituosas", icon: "🍸", url: "https://vinotecaligier.com/espirituosas" },
-  { id: "vinos-guardados", label: "Guardados", icon: "🏆", url: "https://vinotecaligier.com/vinos-guardados" },
-  { id: "wine-club", label: "Wine Club", icon: "♣", url: "https://vinotecaligier.com/contenido-wineclub" },
-  { id: "experiencias", label: "Experiencias", icon: "✨", url: "https://vinotecaligier.com/contenido-experiencias" },
-  { id: "gift-cards", label: "Gift Cards", icon: "🎁", url: "https://vinotecaligier.com/gift-card-ligier.html" },
+  { id: "vinos", label: "Vinos", icon: "🍷" },
+  { id: "whisky", label: "Whisky", icon: "🥃" },
+  { id: "espirituosas", label: "Espirituosas", icon: "🍸" },
+  { id: "vinos-guardados", label: "Guardados", icon: "🏆" },
+  { id: "wine-club", label: "Wine Club", icon: "♣" },
+  { id: "experiencias", label: "Experiencias", icon: "✨" },
+  { id: "gift-cards", label: "Gift Cards", icon: "🎁" },
 ];
 
 const RANGOS = ["20-30k", "30-40k", "40-60k", "60-90k", "90-120k", "+120k"];
 const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
-const STEPS = ["Tipo", "Selección", "Fecha", "Confirmar"];
+
+const TITULOS = {
+  vinos: [
+    "Esta semana,\nelegimos seis.",
+    "Difícil\nquedarse\ncon uno solo.",
+    "Seis etiquetas\nque conocemos\nde memoria.",
+    "Los que\nguardamos\npara vos.",
+    "Una selección\nque vale\ncada peso.",
+    "Mendoza\nen seis\ncopas.",
+    "Del viñedo\na tu mesa\nesta semana.",
+    "Seis razones\npara abrir\nuna botella.",
+    "Lo mejor\ndel mes\nen seis etiquetas.",
+    "Elegimos.\nVos decidís\ncuántas llevás.",
+    "Tintos que\ndicen algo\ndistinto.",
+    "La selección\nque no\nfalla.",
+  ],
+  whisky: [
+    "Destilados\nque cuentan\nsu historia.",
+    "Single malts\ny blends\nde carácter.",
+    "Esta semana,\nelegimos\nlo mejor.",
+    "Escocia,\nIrlanda,\nMendoza.",
+    "Años de\nañejamiento\nen cada sorbo.",
+    "Para los que\nsaben lo que\nquieren.",
+    "Un dram\nque vale\ncada peso.",
+    "La cava\nde whisky\nde Ligier.",
+  ],
+  "vinos-guardados": [
+    "Algunos vinos\nno vuelven.",
+    "El tiempo\nhizo el trabajo.",
+    "Una cava.\nDécadas.\nEsta selección.",
+    "Lo que el tiempo\nconstruyó.",
+    "Botellas que\nya no se repiten.",
+    "Vinos de\notra época.",
+    "La rareza\ntiene nombre\npropio.",
+    "Irrepetibles.\nComo el momento\nde abrirlos.",
+    "Lo que nadie\nmás tiene.",
+    "Una cava\nque habla\npor sí sola.",
+  ],
+  espirituosas: [
+    "Para armar\ntu barra\nen serio.",
+    "Alta graduación,\ncarácter propio.",
+    "El trago\nperfecto\nempieza acá.",
+    "Destilados\nde autor\npara tu mesa.",
+    "Para los que\nno se conforman\ncon cualquier cosa.",
+    "La barra\nque siempre\nquisiste tener.",
+  ],
+  "wine-club": [
+    "Cada mes,\nvinos que\nno encontrás.",
+    "Una membresía\nque sabe\nlo que hacés.",
+    "El club\nque curó\nla cava.",
+    "Acceso preferencial\na lo que\naún no salió.",
+    "Ligier selecciona.\nVos disfrutás.",
+  ],
+  experiencias: [
+    "Una noche\nque no\nse olvida.",
+    "La cena\nque siempre\nquisiste vivir.",
+    "Ligier\nte invita\na la mesa.",
+    "Una experiencia\ncurada\npara vos.",
+    "Comer bien\nes un arte.\nAcompañanos.",
+  ],
+  "gift-cards": [
+    "El regalo\nque siempre\nacertás.",
+    "Para el que\ntiene buen\npaladar.",
+    "Un regalo\ncon criterio\ny con gusto.",
+    "Dale lo\nque realmente\nquiere.",
+    "La elección\nqueda en\nsus manos.",
+  ],
+};
+
+// All titles flat for search
+const ALL_TITULOS = Object.values(TITULOS).flat();
+
+const STEPS = ["Tipo", "Productos", "Accesorio", "Título", "Promos", "Fecha", "Opciones", "Confirmar"];
 
 const PROGRESS_STEPS = [
-  "Buscando productos...",
-  "Generando email...",
+  "Cargando template...",
+  "Consultando productos...",
+  "Armando el email...",
   "Creando campaña...",
   "Programando envío...",
-  "Enviando prueba...",
 ];
 
 export default function App() {
   const [step, setStep] = useState(0);
-  const [form, setForm] = useState({ tipo: "", rango: "", seleccion: "carrito", carrito: "", urls: "", dia: "Miércoles", hora: "10:30", notas: "" });
+  const [form, setForm] = useState({
+    tipo: "", rango: "", seleccion: "carrito", carrito: "", urls: "",
+    accesorio: "auto", accesorioUrl: "",
+    titulo: "", tituloCustom: false,
+    tienePromo: true,
+    dia: "Miércoles", hora: "10:30",
+    modo: "programar", // "programar" | "borrador"
+    emailPrueba: "dayanmartin@gmail.com",
+    notas: "",
+  });
   const [loading, setLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [tituloSearch, setTituloSearch] = useState("");
 
-  const selectedTipo = TIPOS.find(t => t.id === form.tipo);
   const update = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const selectedTipo = TIPOS.find(t => t.id === form.tipo);
+  const titulosDisponibles = form.tipo
+    ? [...(TITULOS[form.tipo] || []), ...ALL_TITULOS.filter(t => !(TITULOS[form.tipo] || []).includes(t))]
+    : ALL_TITULOS;
+  const titulosFiltrados = tituloSearch
+    ? titulosDisponibles.filter(t => t.toLowerCase().includes(tituloSearch.toLowerCase()))
+    : titulosDisponibles;
 
   const canNext = () => {
     if (step === 0) return form.tipo !== "";
     if (step === 1) {
-      if (form.seleccion === "auto") return form.rango !== "";
       if (form.seleccion === "carrito") return form.carrito !== "";
       if (form.seleccion === "urls") return form.urls.trim() !== "";
+      return false;
     }
-    if (step === 2) return form.dia !== "" && form.hora !== "";
+    if (step === 2) return form.accesorio === "auto" || form.accesorioUrl !== "";
+    if (step === 3) return form.titulo !== "";
+    if (step === 4) return true;
+    if (step === 5) return form.dia !== "" && form.hora !== "";
+    if (step === 6) return form.emailPrueba !== "";
     return true;
   };
 
@@ -48,11 +140,7 @@ export default function App() {
     setLoading(true);
     setError(null);
     setLoadingStep(0);
-
-    const interval = setInterval(() => {
-      setLoadingStep(s => Math.min(s + 1, PROGRESS_STEPS.length - 1));
-    }, 8000);
-
+    const interval = setInterval(() => setLoadingStep(s => Math.min(s + 1, PROGRESS_STEPS.length - 1)), 6000);
     try {
       const res = await fetch('/api/generate-campaign', {
         method: 'POST',
@@ -61,11 +149,7 @@ export default function App() {
       });
       const data = await res.json();
       clearInterval(interval);
-      if (!res.ok || !data.success) {
-        setError(data.error || 'Error desconocido');
-        setLoading(false);
-        return;
-      }
+      if (!res.ok || !data.success) { setError(data.error || 'Error desconocido'); setLoading(false); return; }
       setResult(data);
       setLoading(false);
     } catch (err) {
@@ -75,176 +159,233 @@ export default function App() {
     }
   };
 
-  // Loading screen
+  const reset = () => {
+    setResult(null); setStep(0); setError(null); setTituloSearch("");
+    setForm({ tipo: "", rango: "", seleccion: "carrito", carrito: "", urls: "", accesorio: "auto", accesorioUrl: "", titulo: "", tituloCustom: false, tienePromo: true, dia: "Miércoles", hora: "10:30", modo: "programar", emailPrueba: "dayanmartin@gmail.com", notas: "" });
+  };
+
   if (loading) return (
     <div style={s.container}>
-      <div style={s.header}><div style={s.logo}>LIGIER</div><div style={s.headerSub}>Generando campaña</div></div>
+      <div style={s.header}><div style={s.logo}>LIGIER</div><div style={s.sub}>Generando campaña</div></div>
       <div style={{ ...s.card, textAlign: 'center', paddingTop: 48, paddingBottom: 48 }}>
         <div style={s.spinner} />
         <p style={s.loadingText}>{PROGRESS_STEPS[loadingStep]}</p>
-        <div style={s.dots}>
-          {PROGRESS_STEPS.map((_, i) => (
-            <div key={i} style={{ ...s.dot, background: i <= loadingStep ? '#111' : '#e0e0e0' }} />
-          ))}
-        </div>
-        <p style={s.loadingNote}>Esto puede tardar hasta 60 segundos</p>
+        <div style={s.dots}>{PROGRESS_STEPS.map((_, i) => <div key={i} style={{ ...s.dot, background: i <= loadingStep ? '#111' : '#e0e0e0' }} />)}</div>
       </div>
     </div>
   );
 
-  // Success screen
   if (result) return (
     <div style={s.container}>
       <div style={s.header}><div style={s.logo}>LIGIER</div></div>
       <div style={s.card}>
         <div style={s.successIcon}>✓</div>
-        <h2 style={s.successTitle}>Campaña lista</h2>
+        <h2 style={s.successTitle}>{result.isDraft ? 'Borrador creado' : 'Campaña programada'}</h2>
         <div style={s.summaryBox}>
           {[
             { label: "Campaña", value: result.campaignName },
-            { label: "Programada", value: new Date(result.scheduleTime).toLocaleString('es-AR') },
-            { label: "Prueba enviada a", value: "dayanmartin@gmail.com" },
-          ].map((item, i) => (
+            result.isDraft ? null : { label: "Programada", value: new Date(result.scheduleTime).toLocaleString('es-AR') },
+            { label: "Prueba enviada a", value: result.testEmail },
+            { label: "Productos", value: `${result.productsFound} productos` },
+          ].filter(Boolean).map((item, i) => (
             <div key={i} style={s.summaryRow}>
               <span style={s.summaryLabel}>{item.label}</span>
               <span style={s.summaryValue}>{item.value}</span>
             </div>
           ))}
         </div>
-        {result.mailchimpUrl && (
-          <a href={result.mailchimpUrl} target="_blank" rel="noopener noreferrer" style={s.mcLink}>
-            Ver en Mailchimp →
-          </a>
-        )}
-        <button style={s.resetBtn} onClick={() => { setResult(null); setStep(0); setForm({ tipo: "", rango: "", seleccion: "carrito", carrito: "", urls: "", dia: "Miércoles", hora: "10:30", notas: "" }); }}>
-          Nueva campaña
-        </button>
+        {result.mailchimpUrl && <a href={result.mailchimpUrl} target="_blank" rel="noopener noreferrer" style={s.mcLink}>Ver en Mailchimp →</a>}
+        <button style={s.resetBtn} onClick={reset}>Nueva campaña</button>
       </div>
     </div>
   );
 
   return (
     <div style={s.container}>
-      <div style={s.header}>
-        <div style={s.logo}>LIGIER</div>
-        <div style={s.headerSub}>Campañas de email</div>
-      </div>
+      <div style={s.header}><div style={s.logo}>LIGIER</div><div style={s.sub}>Campañas de email</div></div>
 
       {/* Progress */}
       <div style={s.progress}>
         {STEPS.map((label, i) => (
           <div key={i} style={s.progressItem}>
             <div style={{ ...s.progressDot, background: i <= step ? '#111' : '#e0e0e0', transform: i === step ? 'scale(1.3)' : 'scale(1)' }} />
-            <span style={{ ...s.progressLabel, color: i <= step ? '#111' : '#bbb' }}>{label}</span>
+            <span style={{ ...s.progressLabel, color: i <= step ? '#111' : '#bbb', display: i <= step + 1 ? 'block' : 'none' }}>{label}</span>
           </div>
         ))}
       </div>
 
       <div style={s.card}>
 
-        {/* Step 0 */}
-        {step === 0 && (
-          <div>
-            <h2 style={s.stepTitle}>¿Qué tipo de email?</h2>
-            <div style={s.tipoGrid}>
-              {TIPOS.map(t => (
-                <button key={t.id} style={{ ...s.tipoBtn, background: form.tipo === t.id ? '#111' : '#fff', color: form.tipo === t.id ? '#fff' : '#111', border: `2px solid ${form.tipo === t.id ? '#111' : '#e8e8e8'}` }} onClick={() => update('tipo', t.id)}>
-                  <span style={s.tipoIcon}>{t.icon}</span>
-                  <span style={s.tipoLabel}>{t.label}</span>
-                </button>
-              ))}
-            </div>
+        {/* STEP 0 — Tipo */}
+        {step === 0 && <>
+          <h2 style={s.stepTitle}>¿Qué tipo de email?</h2>
+          <div style={s.tipoGrid}>
+            {TIPOS.map(t => (
+              <button key={t.id} style={{ ...s.tipoBtn, background: form.tipo === t.id ? '#111' : '#fff', color: form.tipo === t.id ? '#fff' : '#111', border: `2px solid ${form.tipo === t.id ? '#111' : '#e8e8e8'}` }} onClick={() => update('tipo', t.id)}>
+                <span style={{ fontSize: 22 }}>{t.icon}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>{t.label}</span>
+              </button>
+            ))}
           </div>
-        )}
+        </>}
 
-        {/* Step 1 */}
-        {step === 1 && (
-          <div>
-            <h2 style={s.stepTitle}>¿Cómo elegimos los productos?</h2>
-            <div style={s.modeGroup}>
-              {[
-                { id: "carrito", label: "Traigo el link del carrito", sub: "Generaste el carrito en el sitio" },
-                { id: "urls", label: "Traigo las URLs", sub: "Pegás los links de cada producto" },
-                { id: "auto", label: "Claude navega el sitio", sub: "Próximamente — usá carrito o URLs por ahora" },
-              ].map(m => (
-                <button key={m.id} style={{ ...s.modeBtn, background: form.seleccion === m.id ? '#111' : '#fff', color: form.seleccion === m.id ? '#fff' : m.id === 'auto' ? '#ccc' : '#111', border: `2px solid ${form.seleccion === m.id ? '#111' : '#e8e8e8'}`, opacity: m.id === 'auto' ? 0.5 : 1, cursor: m.id === 'auto' ? 'not-allowed' : 'pointer' }} onClick={() => m.id !== 'auto' && update('seleccion', m.id)}>
-                  <span style={{ fontSize: 14, fontWeight: 700, display: 'block', marginBottom: 2 }}>{m.label}</span>
-                  <span style={{ fontSize: 12, opacity: 0.7 }}>{m.sub}</span>
-                </button>
-              ))}
-            </div>
-
-            {form.seleccion === 'auto' && (
-              <div style={{ marginTop: 20 }}>
-                <label style={s.label}>Rango de precio</label>
-                <div style={s.rangoGrid}>
-                  {RANGOS.map(r => (
-                    <button key={r} style={{ ...s.rangoBtn, background: form.rango === r ? '#111' : '#fff', color: form.rango === r ? '#fff' : '#111', border: `2px solid ${form.rango === r ? '#111' : '#e8e8e8'}` }} onClick={() => update('rango', r)}>${r}</button>
-                  ))}
-                </div>
-              </div>
-            )}
-            {form.seleccion === 'carrito' && (
-              <div style={{ marginTop: 20 }}>
-                <label style={s.label}>Link del carrito</label>
-                <textarea style={s.textarea} placeholder="https://vinotecaligier.com/compartircarrito/..." value={form.carrito} onChange={e => update('carrito', e.target.value)} rows={3} />
-              </div>
-            )}
-            {form.seleccion === 'urls' && (
-              <div style={{ marginTop: 20 }}>
-                <label style={s.label}>URLs de productos (una por línea, exactamente 6)</label>
-                <textarea style={s.textarea} placeholder={"https://vinotecaligier.com/producto-1.html\nhttps://vinotecaligier.com/producto-2.html\n..."} value={form.urls} onChange={e => update('urls', e.target.value)} rows={7} />
-              </div>
-            )}
+        {/* STEP 1 — Productos */}
+        {step === 1 && <>
+          <h2 style={s.stepTitle}>¿Cómo elegimos los productos?</h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
+            {[
+              { id: "carrito", label: "Link del carrito", sub: "Generaste el carrito en el sitio" },
+              { id: "urls", label: "URLs de productos", sub: "Pegás los links uno por uno" },
+            ].map(m => (
+              <button key={m.id} style={{ ...s.modeBtn, background: form.seleccion === m.id ? '#111' : '#fff', color: form.seleccion === m.id ? '#fff' : '#111', border: `2px solid ${form.seleccion === m.id ? '#111' : '#e8e8e8'}` }} onClick={() => update('seleccion', m.id)}>
+                <span style={{ fontSize: 14, fontWeight: 700, display: 'block', marginBottom: 2 }}>{m.label}</span>
+                <span style={{ fontSize: 12, opacity: 0.7 }}>{m.sub}</span>
+              </button>
+            ))}
           </div>
-        )}
-
-        {/* Step 2 */}
-        {step === 2 && (
-          <div>
-            <h2 style={s.stepTitle}>¿Cuándo se manda?</h2>
-            <label style={s.label}>Día</label>
-            <div style={s.diaGrid}>
-              {DIAS.map(d => (
-                <button key={d} style={{ ...s.diaBtn, background: form.dia === d ? '#111' : '#fff', color: form.dia === d ? '#fff' : '#111', border: `2px solid ${form.dia === d ? '#111' : '#e8e8e8'}` }} onClick={() => update('dia', d)}>{d.slice(0, 3)}</button>
+          {form.seleccion === 'carrito' && <>
+            <label style={s.label}>Link del carrito</label>
+            <textarea style={s.textarea} placeholder="https://vinotecaligier.com/compartircarrito/..." value={form.carrito} onChange={e => update('carrito', e.target.value)} rows={3} />
+          </>}
+          {form.seleccion === 'urls' && <>
+            <label style={s.label}>URLs (una por línea)</label>
+            <textarea style={s.textarea} placeholder={"https://vinotecaligier.com/producto-1.html\n..."} value={form.urls} onChange={e => update('urls', e.target.value)} rows={7} />
+          </>}
+          {form.tipo && !['vinos-guardados','wine-club','experiencias'].includes(form.tipo) && <>
+            <label style={{ ...s.label, marginTop: 20 }}>Rango de precio (opcional)</label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+              {RANGOS.map(r => (
+                <button key={r} style={{ ...s.rangoBtn, background: form.rango === r ? '#111' : '#fff', color: form.rango === r ? '#fff' : '#111', border: `2px solid ${form.rango === r ? '#111' : '#e8e8e8'}` }} onClick={() => update('rango', r)}>${r}</button>
               ))}
             </div>
-            <label style={{ ...s.label, marginTop: 20 }}>Hora</label>
-            <input type="time" style={s.input} value={form.hora} onChange={e => update('hora', e.target.value)} />
-            <label style={{ ...s.label, marginTop: 20 }}>Notas adicionales (opcional)</label>
+          </>}
+        </>}
+
+        {/* STEP 2 — Accesorio */}
+        {step === 2 && <>
+          <h2 style={s.stepTitle}>Artículo complementario</h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
+            {[
+              { id: "auto", label: "Claude elige automáticamente", sub: "Busca el accesorio más afín a los productos" },
+              { id: "manual", label: "Yo elijo el accesorio", sub: "Pegás la URL del producto" },
+              { id: "ninguno", label: "Sin accesorio", sub: "El email va sin sección complementaria" },
+            ].map(m => (
+              <button key={m.id} style={{ ...s.modeBtn, background: form.accesorio === m.id ? '#111' : '#fff', color: form.accesorio === m.id ? '#fff' : '#111', border: `2px solid ${form.accesorio === m.id ? '#111' : '#e8e8e8'}` }} onClick={() => update('accesorio', m.id)}>
+                <span style={{ fontSize: 14, fontWeight: 700, display: 'block', marginBottom: 2 }}>{m.label}</span>
+                <span style={{ fontSize: 12, opacity: 0.7 }}>{m.sub}</span>
+              </button>
+            ))}
+          </div>
+          {form.accesorio === 'manual' && <>
+            <label style={s.label}>URL del accesorio</label>
+            <input style={s.input} placeholder="https://vinotecaligier.com/accesorio.html" value={form.accesorioUrl} onChange={e => update('accesorioUrl', e.target.value)} />
+          </>}
+        </>}
+
+        {/* STEP 3 — Título */}
+        {step === 3 && <>
+          <h2 style={s.stepTitle}>Título del email</h2>
+          <input style={{ ...s.input, marginBottom: 16 }} placeholder="Buscar título..." value={tituloSearch} onChange={e => setTituloSearch(e.target.value)} />
+          <div style={{ maxHeight: 280, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+            {titulosFiltrados.map((t, i) => (
+              <button key={i} style={{ ...s.tituloBtn, background: form.titulo === t ? '#111' : '#fff', color: form.titulo === t ? '#fff' : '#111', border: `1.5px solid ${form.titulo === t ? '#111' : '#e8e8e8'}` }} onClick={() => { update('titulo', t); update('tituloCustom', false); }}>
+                {t.split('\n').map((line, j) => <span key={j} style={{ display: 'block', lineHeight: 1.3 }}>{line}</span>)}
+              </button>
+            ))}
+          </div>
+          <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 16 }}>
+            <label style={s.label}>O escribí tu propio título</label>
+            <textarea style={s.textarea} placeholder={"Máx 3 líneas · máx 6 palabras por línea\nSin punto final · sin precio ni promo"} rows={3}
+              value={form.tituloCustom ? form.titulo : ''}
+              onChange={e => { update('titulo', e.target.value); update('tituloCustom', true); }}
+            />
+          </div>
+        </>}
+
+        {/* STEP 4 — Promos */}
+        {step === 4 && <>
+          <h2 style={s.stepTitle}>¿Aplica promoción?</h2>
+          <p style={{ fontSize: 13, color: '#888', marginBottom: 20, lineHeight: 1.5 }}>¿El total del carrito ya incluye algún descuento o promoción aplicada por Magento?</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {[
+              { id: true, label: "Sí, hay promoción activa", sub: "Ej: 6x5, descuento porcentual, etc." },
+              { id: false, label: "No, precio de lista", sub: "Sin descuentos aplicados" },
+            ].map(m => (
+              <button key={String(m.id)} style={{ ...s.modeBtn, background: form.tienePromo === m.id ? '#111' : '#fff', color: form.tienePromo === m.id ? '#fff' : '#111', border: `2px solid ${form.tienePromo === m.id ? '#111' : '#e8e8e8'}` }} onClick={() => update('tienePromo', m.id)}>
+                <span style={{ fontSize: 14, fontWeight: 700, display: 'block', marginBottom: 2 }}>{m.label}</span>
+                <span style={{ fontSize: 12, opacity: 0.7 }}>{m.sub}</span>
+              </button>
+            ))}
+          </div>
+          <div style={{ marginTop: 20 }}>
+            <label style={s.label}>Notas adicionales (opcional)</label>
             <textarea style={s.textarea} placeholder="Ej: enfocarse en Malbecs de Altamira..." value={form.notas} onChange={e => update('notas', e.target.value)} rows={3} />
           </div>
-        )}
+        </>}
 
-        {/* Step 3 */}
-        {step === 3 && (
-          <div>
-            <h2 style={s.stepTitle}>Confirmar campaña</h2>
-            {error && <div style={s.errorBox}>{error}</div>}
-            <div style={s.summaryBox}>
-              {[
-                { label: "Tipo", value: selectedTipo?.label },
-                { label: "Selección", value: form.seleccion === 'auto' ? `Claude elige · $${form.rango}` : form.seleccion === 'carrito' ? 'Link de carrito' : 'URLs de productos' },
-                { label: "Envío", value: `${form.dia} · ${form.hora}` },
-                { label: "Prueba a", value: "dayanmartin@gmail.com" },
-                { label: "Reply-to", value: "ventas@ligier.com.ar" },
-              ].map((item, i) => (
-                <div key={i} style={s.summaryRow}>
-                  <span style={s.summaryLabel}>{item.label}</span>
-                  <span style={s.summaryValue}>{item.value}</span>
-                </div>
-              ))}
-            </div>
+        {/* STEP 5 — Fecha */}
+        {step === 5 && <>
+          <h2 style={s.stepTitle}>¿Cuándo se manda?</h2>
+          <label style={s.label}>Día</label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6, marginTop: 8, marginBottom: 20 }}>
+            {DIAS.map(d => (
+              <button key={d} style={{ ...s.diaBtn, background: form.dia === d ? '#111' : '#fff', color: form.dia === d ? '#fff' : '#111', border: `2px solid ${form.dia === d ? '#111' : '#e8e8e8'}` }} onClick={() => update('dia', d)}>{d.slice(0,3)}</button>
+            ))}
           </div>
-        )}
+          <label style={s.label}>Hora</label>
+          <input type="time" style={{ ...s.input, marginBottom: 0 }} value={form.hora} onChange={e => update('hora', e.target.value)} />
+        </>}
+
+        {/* STEP 6 — Opciones */}
+        {step === 6 && <>
+          <h2 style={s.stepTitle}>Opciones de envío</h2>
+          <label style={s.label}>¿Crear campaña o borrador?</label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
+            {[
+              { id: "programar", label: "Crear y programar", sub: `Se manda el ${form.dia} a las ${form.hora}` },
+              { id: "borrador", label: "Solo guardar borrador", sub: "Lo revisás en Mailchimp antes de mandar" },
+            ].map(m => (
+              <button key={m.id} style={{ ...s.modeBtn, background: form.modo === m.id ? '#111' : '#fff', color: form.modo === m.id ? '#fff' : '#111', border: `2px solid ${form.modo === m.id ? '#111' : '#e8e8e8'}` }} onClick={() => update('modo', m.id)}>
+                <span style={{ fontSize: 14, fontWeight: 700, display: 'block', marginBottom: 2 }}>{m.label}</span>
+                <span style={{ fontSize: 12, opacity: 0.7 }}>{m.sub}</span>
+              </button>
+            ))}
+          </div>
+          <label style={s.label}>Email de prueba</label>
+          <input style={s.input} type="email" value={form.emailPrueba} onChange={e => update('emailPrueba', e.target.value)} placeholder="email@ejemplo.com" />
+        </>}
+
+        {/* STEP 7 — Confirmar */}
+        {step === 7 && <>
+          <h2 style={s.stepTitle}>Confirmar</h2>
+          {error && <div style={s.errorBox}>{error}</div>}
+          <div style={s.summaryBox}>
+            {[
+              { label: "Tipo", value: selectedTipo?.label },
+              { label: "Selección", value: form.seleccion === 'carrito' ? 'Link de carrito' : 'URLs de productos' },
+              { label: "Accesorio", value: form.accesorio === 'auto' ? 'Claude elige' : form.accesorio === 'ninguno' ? 'Sin accesorio' : 'Manual' },
+              { label: "Título", value: form.titulo.replace(/\n/g, ' · ') },
+              { label: "Promoción", value: form.tienePromo ? 'Sí' : 'No' },
+              { label: "Envío", value: form.modo === 'borrador' ? 'Borrador' : `${form.dia} · ${form.hora}` },
+              { label: "Email prueba", value: form.emailPrueba },
+            ].map((item, i) => (
+              <div key={i} style={s.summaryRow}>
+                <span style={s.summaryLabel}>{item.label}</span>
+                <span style={s.summaryValue}>{item.value}</span>
+              </div>
+            ))}
+          </div>
+        </>}
       </div>
 
       {/* Nav */}
       <div style={s.nav}>
         {step > 0 && <button style={s.backBtn} onClick={() => { setError(null); setStep(s => s - 1); }}>← Volver</button>}
-        {step < 3
+        {step < STEPS.length - 1
           ? <button style={{ ...s.nextBtn, opacity: canNext() ? 1 : 0.4 }} disabled={!canNext()} onClick={() => setStep(s => s + 1)}>Continuar →</button>
-          : <button style={s.nextBtn} onClick={handleSubmit}>Generar y programar →</button>
+          : <button style={s.nextBtn} onClick={handleSubmit}>
+              {form.modo === 'borrador' ? 'Guardar borrador →' : 'Generar y programar →'}
+            </button>
         }
       </div>
     </div>
@@ -255,39 +396,34 @@ const s = {
   container: { minHeight: '100vh', background: '#f4f1ec', fontFamily: 'Georgia, serif', maxWidth: 480, margin: '0 auto', paddingBottom: 40 },
   header: { background: '#111', padding: '28px 24px 24px', textAlign: 'center' },
   logo: { color: '#fff', fontSize: 22, fontWeight: 700, letterSpacing: 6, marginBottom: 4 },
-  headerSub: { color: 'rgba(255,255,255,0.5)', fontSize: 11, letterSpacing: 2, textTransform: 'uppercase' },
-  progress: { display: 'flex', justifyContent: 'center', gap: 32, padding: '20px 24px', background: '#fff', borderBottom: '1px solid #eee' },
-  progressItem: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 },
+  sub: { color: 'rgba(255,255,255,0.5)', fontSize: 11, letterSpacing: 2, textTransform: 'uppercase' },
+  progress: { display: 'flex', justifyContent: 'center', gap: 16, padding: '16px 24px', background: '#fff', borderBottom: '1px solid #eee', overflowX: 'auto' },
+  progressItem: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, minWidth: 40 },
   progressDot: { width: 8, height: 8, borderRadius: '50%', transition: 'all 0.2s' },
-  progressLabel: { fontSize: 9, letterSpacing: 1, textTransform: 'uppercase', transition: 'color 0.2s' },
+  progressLabel: { fontSize: 8, letterSpacing: 1, textTransform: 'uppercase', transition: 'color 0.2s', whiteSpace: 'nowrap' },
   card: { background: '#fff', margin: 16, padding: 24, borderRadius: 2 },
   stepTitle: { fontSize: 20, fontWeight: 700, color: '#111', marginBottom: 20, letterSpacing: -0.5 },
   tipoGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 },
   tipoBtn: { display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '16px 12px', borderRadius: 2, cursor: 'pointer', transition: 'all 0.15s', gap: 6 },
-  tipoIcon: { fontSize: 22 },
-  tipoLabel: { fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' },
-  modeGroup: { display: 'flex', flexDirection: 'column', gap: 10 },
   modeBtn: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', padding: '14px 16px', borderRadius: 2, cursor: 'pointer', transition: 'all 0.15s', textAlign: 'left' },
-  rangoGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 8 },
   rangoBtn: { padding: '10px 8px', borderRadius: 2, cursor: 'pointer', fontSize: 12, fontWeight: 700, transition: 'all 0.15s' },
+  tituloBtn: { textAlign: 'left', padding: '12px 14px', borderRadius: 2, cursor: 'pointer', transition: 'all 0.15s', lineHeight: 1.4, fontSize: 14, fontWeight: 500 },
   label: { display: 'block', fontSize: 10, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: '#aaa', marginBottom: 8 },
   textarea: { width: '100%', padding: 12, border: '1.5px solid #e8e8e8', borderRadius: 2, fontSize: 13, fontFamily: 'monospace', resize: 'vertical', boxSizing: 'border-box', outline: 'none' },
-  input: { width: '100%', padding: 12, border: '1.5px solid #e8e8e8', borderRadius: 2, fontSize: 16, boxSizing: 'border-box', outline: 'none' },
-  diaGrid: { display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6, marginTop: 8 },
+  input: { width: '100%', padding: 12, border: '1.5px solid #e8e8e8', borderRadius: 2, fontSize: 14, boxSizing: 'border-box', outline: 'none', fontFamily: 'Georgia, serif' },
   diaBtn: { padding: '10px 4px', borderRadius: 2, cursor: 'pointer', fontSize: 11, fontWeight: 700, transition: 'all 0.15s' },
   summaryBox: { border: '1.5px solid #e8e8e8', borderRadius: 2, overflow: 'hidden' },
-  summaryRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid #f0f0f0' },
+  summaryRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 16px', borderBottom: '1px solid #f0f0f0' },
   summaryLabel: { fontSize: 10, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: '#aaa' },
-  summaryValue: { fontSize: 13, fontWeight: 700, color: '#111', textAlign: 'right', maxWidth: '60%' },
+  summaryValue: { fontSize: 12, fontWeight: 700, color: '#111', textAlign: 'right', maxWidth: '60%' },
   nav: { display: 'flex', gap: 10, padding: '0 16px', marginTop: 8 },
   backBtn: { flex: 1, padding: 14, background: '#fff', border: '1.5px solid #e8e8e8', borderRadius: 2, fontSize: 13, fontWeight: 700, cursor: 'pointer', color: '#111' },
   nextBtn: { flex: 2, padding: 14, background: '#111', border: 'none', borderRadius: 2, fontSize: 13, fontWeight: 700, cursor: 'pointer', color: '#fff', transition: 'opacity 0.15s' },
   errorBox: { background: '#fff0f0', border: '1px solid #ffcccc', borderRadius: 2, padding: '12px 16px', marginBottom: 16, fontSize: 13, color: '#cc0000' },
   spinner: { width: 40, height: 40, border: '3px solid #f0f0f0', borderTop: '3px solid #111', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 24px' },
   loadingText: { fontSize: 16, fontWeight: 700, color: '#111', marginBottom: 16 },
-  dots: { display: 'flex', justifyContent: 'center', gap: 8, marginBottom: 16 },
+  dots: { display: 'flex', justifyContent: 'center', gap: 8 },
   dot: { width: 8, height: 8, borderRadius: '50%', transition: 'background 0.5s' },
-  loadingNote: { fontSize: 12, color: '#aaa' },
   successIcon: { width: 48, height: 48, background: '#111', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 22, marginBottom: 16 },
   successTitle: { fontSize: 22, fontWeight: 700, color: '#111', marginBottom: 16, letterSpacing: -0.5 },
   mcLink: { display: 'block', textAlign: 'center', padding: 14, background: '#f4f1ec', color: '#111', fontWeight: 700, fontSize: 13, textDecoration: 'none', borderRadius: 2, marginTop: 16, marginBottom: 10 },
