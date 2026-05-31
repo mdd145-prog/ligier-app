@@ -120,7 +120,7 @@ function buildProductBlock(product, index, isLast, tipo) {
       </table>`;
 }
 
-function injectProductsIntoTemplate(template, products, cartLink, cartTotal, tipo, mes) {
+function injectProductsIntoTemplate(template, products, cartLink, cartTotal, tipo, mes, titulo) {
   let result = template;
 
   // 1. Update title
@@ -220,7 +220,7 @@ export default async function handler(req, res) {
     }
 
     // ── Step 5: Inject products into template ──
-    const emailHtml = injectProductsIntoTemplate(baseTemplate, products, cartLink, cartTotal, tipo, mes);
+    const emailHtml = injectProductsIntoTemplate(baseTemplate, products, cartLink, cartTotal, tipo, mes, titulo);
 
     if (!emailHtml.includes('<!DOCTYPE')) {
       return res.status(500).json({ error: 'Error generando el email' });
