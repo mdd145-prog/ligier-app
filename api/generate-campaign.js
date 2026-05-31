@@ -2,6 +2,14 @@ export const config = { maxDuration: 60 };
 
 const GITHUB_RAW = 'https://raw.githubusercontent.com/mdd145-prog/mailchimp/main/templates/';
 
+// Wine club membership image placeholders - replace with real URLs when available
+const MEMBERSHIP_IMAGES = {
+  IMAGEN_SILVER:   'https://vinotecaligier.com/media/catalog/product/cache/73269a27812eefec516431430aa0b457/w/c/wc_silver.jpg',
+  IMAGEN_GOLD:     'https://vinotecaligier.com/media/catalog/product/cache/73269a27812eefec516431430aa0b457/w/c/wc_gold.jpg',
+  IMAGEN_PLATINUM: 'https://vinotecaligier.com/media/catalog/product/cache/73269a27812eefec516431430aa0b457/w/c/wc_platinum.jpg',
+  IMAGEN_BLACK:    'https://vinotecaligier.com/media/catalog/product/cache/73269a27812eefec516431430aa0b457/w/c/wc_black.jpg',
+};
+
 const TEMPLATES = {
   'vinos':           'base-email-vinos.html',
   'whisky':          'base-email-whisky.html',
@@ -123,11 +131,18 @@ function buildProductBlock(product, index, isLast, tipo) {
 function injectProductsIntoTemplate(template, products, cartLink, cartTotal, tipo, mes, titulo) {
   let result = template;
 
-  // 1. Update title
-  const monthYear = mes.toUpperCase();
+  // 1. Update eyebrow - just category, no mes/año for guardados
+  const eyebrowText = tipo === 'vinos-guardados' 
+    ? 'VINOS GUARDADOS · LIGIER'
+    : `${tipo.toUpperCase().replace(/-/g, ' ')} · ${mes.toUpperCase()}`;
+  // Replace both possible eyebrow colors (#666 and rgba overlay)
   result = result.replace(
     /(<p[^>]*color:#666[^>]*>)[^<]+(·[^<]+)?(<\/p>)/,
-    `$1${tipo.toUpperCase().replace('-', ' ')} · ${monthYear}$3`
+    `$1${eyebrowText}$3`
+  );
+  result = result.replace(
+    /(<p[^>]*rgba\(255,255,255,0\.5\)[^>]*>)[^<]+(·[^<]+)?(<\/p>)/,
+    `$1${eyebrowText}$3`
   );
 
   // 2. Update hero H1 with selected title
@@ -139,10 +154,16 @@ function injectProductsIntoTemplate(template, products, cartLink, cartTotal, tip
 
   // 3. Replace products section
   const prodStart = result.indexOf('<!-- Producto 1 -->');
-  const prodEnd = result.indexOf('<!-- ── 4b.');
+  // Try 4b first, then 5, then ACCESORIO as fallback
+  let prodEnd = result.indexOf('<!-- ── 4b.');
+  if (prodEnd === -1) prodEnd = result.indexOf('<!-- ── 5.');
+  if (prodEnd === -1) prodEnd = result.indexOf('<!-- ── WINE CLUB');
   if (prodStart !== -1 && prodEnd !== -1) {
     const productsHtml = products.map((p, i) => buildProductBlock(p, i, i === products.length - 1, tipo)).join('\n');
     result = result.substring(0, prodStart) + productsHtml + '\n    ' + result.substring(prodEnd);
+    console.log('Products injected:', products.length);
+  } else {
+    console.error('Could not find injection points. prodStart:', prodStart, 'prodEnd:', prodEnd);
   }
 
   // 4. Update cart links
@@ -226,6 +247,12 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Error generando el email' });
     }
 
+    // Replace membership image placeholders
+    let finalHtml = emailHtml;
+    Object.entries(MEMBERSHIP_IMAGES).forEach(([placeholder, url]) => {
+      finalHtml = finalHtml.replace(new RegExp(placeholder, 'g'), url);
+    });
+
     // ── Step 6: Create Mailchimp campaign ──
     const mcKey = process.env.MAILCHIMP_API_KEY;
     const dc = mcKey.split('-').pop();
@@ -255,7 +282,7 @@ export default async function handler(req, res) {
 
     await fetch(`${mcBase}/campaigns/${campaign.id}/content`, {
       method: 'PUT', headers: mcHeaders,
-      body: JSON.stringify({ html: emailHtml })
+      body: JSON.stringify({ html: finalHtml })
     });
 
     // Send test email
