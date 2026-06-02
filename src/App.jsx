@@ -131,7 +131,7 @@ export default function App() {
       if (form.seleccion === "urls") return form.urls.trim() !== "";
       return false;
     }
-    if (step === 2) return form.accesorio === "auto" || form.accesorioUrl !== "";
+    if (step === 2) return form.accesorio === "ninguno" || form.accesorio === "auto" || (form.accesorio === "manual" && form.accesorioUrl !== "");
     if (step === 3) return form.titulo !== "";
     if (step === 4) return true;
     if (step === 5) return form.dia !== "" && form.hora !== "";
