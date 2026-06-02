@@ -95,6 +95,9 @@ const PROGRESS_STEPS = [
 ];
 
 export default function App() {
+  const [view, setView] = useState("home"); // "home" | "create" | "analysis"
+  const [analysis, setAnalysis] = useState(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
   const [step, setStep] = useState(0);
   const [form, setForm] = useState({
     tipo: "", rango: "", seleccion: "carrito", carrito: "", urls: "",
@@ -136,6 +139,19 @@ export default function App() {
     return true;
   };
 
+  const loadAnalysis = async () => {
+    setView("analysis");
+    setAnalysisLoading(true);
+    try {
+      const res = await fetch('/api/analyze');
+      const data = await res.json();
+      setAnalysis(data);
+    } catch (err) {
+      setAnalysis({ error: err.message });
+    }
+    setAnalysisLoading(false);
+  };
+
   const handleSubmit = async () => {
     setLoading(true);
     setError(null);
@@ -160,9 +176,74 @@ export default function App() {
   };
 
   const reset = () => {
-    setResult(null); setStep(0); setError(null); setTituloSearch("");
+    setResult(null); setStep(0); setError(null); setTituloSearch(""); setView("home");
     setForm({ tipo: "", rango: "", seleccion: "carrito", carrito: "", urls: "", accesorio: "auto", accesorioUrl: "", titulo: "", tituloCustom: false, tienePromo: true, dia: "Miércoles", hora: "10:30", modo: "programar", emailPrueba: "dayanmartin@gmail.com", notas: "" });
   };
+
+
+  // HOME SCREEN
+  if (view === "home") return (
+    <div style={s.container}>
+      <div style={s.header}><div style={s.logo}>LIGIER</div><div style={s.sub}>Campañas de email</div></div>
+      <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <button style={s.homeBtn} onClick={() => { setView("create"); setStep(0); }}>
+          <span style={{ fontSize: 28, marginBottom: 8, display: 'block' }}>✉️</span>
+          <span style={{ fontSize: 16, fontWeight: 700, color: '#111', display: 'block', marginBottom: 4 }}>Crear campaña</span>
+          <span style={{ fontSize: 12, color: '#888' }}>Armá y programá un nuevo email</span>
+        </button>
+        <button style={s.homeBtn} onClick={loadAnalysis}>
+          <span style={{ fontSize: 28, marginBottom: 8, display: 'block' }}>📊</span>
+          <span style={{ fontSize: 16, fontWeight: 700, color: '#111', display: 'block', marginBottom: 4 }}>Análisis de campañas</span>
+          <span style={{ fontSize: 12, color: '#888' }}>Qué funciona y qué optimizar</span>
+        </button>
+      </div>
+    </div>
+  );
+
+  // ANALYSIS SCREEN
+  if (view === "analysis") return (
+    <div style={s.container}>
+      <div style={s.header}><div style={s.logo}>LIGIER</div><div style={s.sub}>Análisis de campañas</div></div>
+      <div style={{ padding: 16 }}>
+        {analysisLoading && <div style={{ ...s.card, textAlign: 'center', padding: 48 }}><div style={s.spinner} /><p style={s.loadingText}>Analizando campañas...</p></div>}
+        {!analysisLoading && analysis?.error && <div style={s.errorBox}>{analysis.error}</div>}
+        {!analysisLoading && analysis?.message && <div style={s.card}><p style={{ fontSize: 14, color: '#888', textAlign: 'center' }}>{analysis.message}</p></div>}
+        {!analysisLoading && analysis?.overall && <>
+          {/* Overall stats */}
+          <div style={s.card}>
+            <h2 style={s.stepTitle}>Resumen general</h2>
+            <div style={s.summaryBox}>
+              <div style={s.summaryRow}><span style={s.summaryLabel}>Campañas</span><span style={s.summaryValue}>{analysis.overall.campañas}</span></div>
+              <div style={s.summaryRow}><span style={s.summaryLabel}>Apertura prom.</span><span style={s.summaryValue}>{analysis.overall.apertura_promedio}%</span></div>
+              <div style={s.summaryRow}><span style={s.summaryLabel}>Click prom.</span><span style={s.summaryValue}>{analysis.overall.click_promedio}%</span></div>
+              <div style={s.summaryRow}><span style={s.summaryLabel}>Ventas</span><span style={s.summaryValue}>${analysis.overall.revenue_total.toLocaleString('es-AR')}</span></div>
+              <div style={s.summaryRow}><span style={s.summaryLabel}>Órdenes</span><span style={s.summaryValue}>{analysis.overall.ordenes_total}</span></div>
+            </div>
+          </div>
+          {/* Insights */}
+          {analysis.insights?.length > 0 && <div style={s.card}>
+            <h2 style={s.stepTitle}>Qué aprendimos</h2>
+            {analysis.insights.map((ins, i) => (
+              <div key={i} style={{ padding: '12px 14px', background: '#f4f1ec', borderRadius: 2, marginBottom: 8, fontSize: 13, color: '#111', lineHeight: 1.5 }}>💡 {ins}</div>
+            ))}
+          </div>}
+          {/* By type */}
+          {analysis.byTipo?.length > 0 && <div style={s.card}>
+            <h2 style={s.stepTitle}>Por tipo de email</h2>
+            <div style={s.summaryBox}>
+              {analysis.byTipo.map((t, i) => (
+                <div key={i} style={s.summaryRow}>
+                  <span style={{ ...s.summaryLabel, textTransform: 'capitalize' }}>{t.name}</span>
+                  <span style={{ fontSize: 11, color: '#888' }}>{t.open_rate}% ap · {t.click_rate}% clk · ${t.revenue.toLocaleString('es-AR')}</span>
+                </div>
+              ))}
+            </div>
+          </div>}
+        </>}
+        <button style={{ ...s.resetBtn, marginTop: 8 }} onClick={() => setView("home")}>← Volver al inicio</button>
+      </div>
+    </div>
+  );
 
   if (loading) return (
     <div style={s.container}>
@@ -380,7 +461,7 @@ export default function App() {
 
       {/* Nav */}
       <div style={s.nav}>
-        {step > 0 && <button style={s.backBtn} onClick={() => { setError(null); setStep(s => s - 1); }}>← Volver</button>}
+        <button style={s.backBtn} onClick={() => { if (step === 0) { setView('home'); } else { setError(null); setStep(s => s - 1); } }}>← Volver</button>
         {step < STEPS.length - 1
           ? <button style={{ ...s.nextBtn, opacity: canNext() ? 1 : 0.4 }} disabled={!canNext()} onClick={() => setStep(s => s + 1)}>Continuar →</button>
           : <button style={s.nextBtn} onClick={handleSubmit}>
@@ -427,5 +508,6 @@ const s = {
   successIcon: { width: 48, height: 48, background: '#111', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 22, marginBottom: 16 },
   successTitle: { fontSize: 22, fontWeight: 700, color: '#111', marginBottom: 16, letterSpacing: -0.5 },
   mcLink: { display: 'block', textAlign: 'center', padding: 14, background: '#f4f1ec', color: '#111', fontWeight: 700, fontSize: 13, textDecoration: 'none', borderRadius: 2, marginTop: 16, marginBottom: 10 },
+  homeBtn: { width: '100%', background: '#fff', border: '1.5px solid #e8e8e8', borderRadius: 2, padding: '28px 24px', cursor: 'pointer', textAlign: 'center' },
   resetBtn: { width: '100%', padding: 14, background: '#fff', color: '#111', border: '1.5px solid #e8e8e8', borderRadius: 2, fontSize: 13, fontWeight: 700, cursor: 'pointer', marginTop: 4 },
 };
