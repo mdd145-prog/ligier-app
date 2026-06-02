@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { TITULOS, BAJADAS } from "./copy-library";
 
 const TIPOS = [
   { id: "vinos", label: "Vinos", icon: "🍷" },
@@ -13,76 +14,6 @@ const TIPOS = [
 const RANGOS = ["20-30k", "30-40k", "40-60k", "60-90k", "90-120k", "+120k"];
 const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 
-const TITULOS = {
-  vinos: [
-    "Esta semana,\nelegimos seis.",
-    "Difícil\nquedarse\ncon uno solo.",
-    "Seis etiquetas\nque conocemos\nde memoria.",
-    "Los que\nguardamos\npara vos.",
-    "Una selección\nque vale\ncada peso.",
-    "Mendoza\nen seis\ncopas.",
-    "Del viñedo\na tu mesa\nesta semana.",
-    "Seis razones\npara abrir\nuna botella.",
-    "Lo mejor\ndel mes\nen seis etiquetas.",
-    "Elegimos.\nVos decidís\ncuántas llevás.",
-    "Tintos que\ndicen algo\ndistinto.",
-    "La selección\nque no\nfalla.",
-  ],
-  whisky: [
-    "Destilados\nque cuentan\nsu historia.",
-    "Single malts\ny blends\nde carácter.",
-    "Esta semana,\nelegimos\nlo mejor.",
-    "Escocia,\nIrlanda,\nMendoza.",
-    "Años de\nañejamiento\nen cada sorbo.",
-    "Para los que\nsaben lo que\nquieren.",
-    "Un dram\nque vale\ncada peso.",
-    "La cava\nde whisky\nde Ligier.",
-  ],
-  "vinos-guardados": [
-    "Algunos vinos\nno vuelven.",
-    "El tiempo\nhizo el trabajo.",
-    "Una cava.\nDécadas.\nEsta selección.",
-    "Lo que el tiempo\nconstruyó.",
-    "Botellas que\nya no se repiten.",
-    "Vinos de\notra época.",
-    "La rareza\ntiene nombre\npropio.",
-    "Irrepetibles.\nComo el momento\nde abrirlos.",
-    "Lo que nadie\nmás tiene.",
-    "Una cava\nque habla\npor sí sola.",
-  ],
-  espirituosas: [
-    "Para armar\ntu barra\nen serio.",
-    "Alta graduación,\ncarácter propio.",
-    "El trago\nperfecto\nempieza acá.",
-    "Destilados\nde autor\npara tu mesa.",
-    "Para los que\nno se conforman\ncon cualquier cosa.",
-    "La barra\nque siempre\nquisiste tener.",
-  ],
-  "wine-club": [
-    "Cada mes,\nvinos que\nno encontrás.",
-    "Una membresía\nque sabe\nlo que hacés.",
-    "El club\nque curó\nla cava.",
-    "Acceso preferencial\na lo que\naún no salió.",
-    "Ligier selecciona.\nVos disfrutás.",
-  ],
-  experiencias: [
-    "Una noche\nque no\nse olvida.",
-    "La cena\nque siempre\nquisiste vivir.",
-    "Ligier\nte invita\na la mesa.",
-    "Una experiencia\ncurada\npara vos.",
-    "Comer bien\nes un arte.\nAcompañanos.",
-  ],
-  "gift-cards": [
-    "El regalo\nque siempre\nacertás.",
-    "Para el que\ntiene buen\npaladar.",
-    "Un regalo\ncon criterio\ny con gusto.",
-    "Dale lo\nque realmente\nquiere.",
-    "La elección\nqueda en\nsus manos.",
-  ],
-};
-
-// All titles flat for search
-const ALL_TITULOS = Object.values(TITULOS).flat();
 
 const STEPS = ["Tipo", "Productos", "Accesorio", "Título", "Promos", "Fecha", "Opciones", "Confirmar"];
 
@@ -102,7 +33,7 @@ export default function App() {
   const [form, setForm] = useState({
     tipo: "", rango: "", seleccion: "carrito", carrito: "", urls: "",
     accesorio: "auto", accesorioUrl: "",
-    titulo: "", tituloCustom: false,
+    titulo: "", tituloCustom: false, bajada: "",
     tienePromo: true,
     dia: "Miércoles", hora: "10:30",
     modo: "programar", // "programar" | "borrador"
@@ -117,12 +48,11 @@ export default function App() {
 
   const update = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const selectedTipo = TIPOS.find(t => t.id === form.tipo);
-  const titulosDisponibles = form.tipo
-    ? [...(TITULOS[form.tipo] || []), ...ALL_TITULOS.filter(t => !(TITULOS[form.tipo] || []).includes(t))]
-    : ALL_TITULOS;
+  const titulosDisponibles = form.tipo ? (TITULOS[form.tipo] || []) : [];
   const titulosFiltrados = tituloSearch
     ? titulosDisponibles.filter(t => t.toLowerCase().includes(tituloSearch.toLowerCase()))
     : titulosDisponibles;
+  const bajadasDisponibles = form.tipo ? (BAJADAS[form.tipo] || []) : [];
 
   const canNext = () => {
     if (step === 0) return form.tipo !== "";
@@ -177,7 +107,7 @@ export default function App() {
 
   const reset = () => {
     setResult(null); setStep(0); setError(null); setTituloSearch(""); setView("home");
-    setForm({ tipo: "", rango: "", seleccion: "carrito", carrito: "", urls: "", accesorio: "auto", accesorioUrl: "", titulo: "", tituloCustom: false, tienePromo: true, dia: "Miércoles", hora: "10:30", modo: "programar", emailPrueba: "dayanmartin@gmail.com", notas: "" });
+    setForm({ tipo: "", rango: "", seleccion: "carrito", carrito: "", urls: "", accesorio: "auto", accesorioUrl: "", titulo: "", tituloCustom: false, bajada: "", tienePromo: true, dia: "Miércoles", hora: "10:30", modo: "programar", emailPrueba: "dayanmartin@gmail.com", notas: "" });
   };
 
 
@@ -379,6 +309,20 @@ export default function App() {
             <textarea style={s.textarea} placeholder={"Máx 3 líneas · máx 6 palabras por línea\nSin punto final · sin precio ni promo"} rows={3}
               value={form.tituloCustom ? form.titulo : ''}
               onChange={e => { update('titulo', e.target.value); update('tituloCustom', true); }}
+            />
+          </div>
+          <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 16, marginTop: 16 }}>
+            <label style={s.label}>Bajada (texto bajo el título)</label>
+            <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+              {bajadasDisponibles.map((b, i) => (
+                <button key={i} style={{ ...s.tituloBtn, background: form.bajada === b ? '#111' : '#fff', color: form.bajada === b ? '#fff' : '#111', border: `1.5px solid ${form.bajada === b ? '#111' : '#e8e8e8'}`, fontSize: 13 }}
+                  onClick={() => update('bajada', b)}
+                  dangerouslySetInnerHTML={{ __html: b }} />
+              ))}
+            </div>
+            <textarea style={s.textarea} placeholder={"O escribí tu propia bajada (máx 2 líneas)"} rows={2}
+              value={form.bajada && !bajadasDisponibles.includes(form.bajada) ? form.bajada.replace(/<br>/g, '\n') : ''}
+              onChange={e => update('bajada', e.target.value)}
             />
           </div>
         </>}
