@@ -257,11 +257,16 @@ export default async function handler(req, res) {
       accessory = await getMagentoProductByUrlKey(accKey);
     }
 
-    // 5. Cart total (only for vinos)
+    // 5. Pack total (only for vinos) — calculated like Magento's 6x5 MIX promo:
+    //    subtotal minus the cheapest bottle(s). For every 6 bottles, the cheapest is free.
     let cartTotal = null;
-    if (tipo === 'vinos' && cartLink) {
-      cartTotal = await getCartTotal(cartLink);
-      if (!cartTotal) cartTotal = await getCartTotal(cartLink);
+    if (tipo === 'vinos' && products.length >= 6) {
+      const prices = products.map(p => parseFloat(p.price) || 0).sort((a, b) => a - b);
+      const subtotal = prices.reduce((s, p) => s + p, 0);
+      const freeBottles = Math.floor(products.length / 6);
+      const discount = prices.slice(0, freeBottles).reduce((s, p) => s + p, 0);
+      const total = Math.round(subtotal - discount);
+      cartTotal = '$' + total.toLocaleString('es-AR');
     }
 
     // 6. Membership images for guardados (from Magento)
