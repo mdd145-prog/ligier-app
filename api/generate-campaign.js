@@ -2,48 +2,22 @@ export const config = { maxDuration: 60 };
 
 const GITHUB_RAW = 'https://raw.githubusercontent.com/mdd145-prog/mailchimp/main/templates/';
 
-// Wine club membership image placeholders - replace with real URLs when available
-const MEMBERSHIP_IMAGES = {
-  IMAGEN_SILVER:   'https://vinotecaligier.com/media/catalog/product/cache/73269a27812eefec516431430aa0b457/w/c/wc_silver.jpg',
-  IMAGEN_GOLD:     'https://vinotecaligier.com/media/catalog/product/cache/73269a27812eefec516431430aa0b457/w/c/wc_gold.jpg',
-  IMAGEN_PLATINUM: 'https://vinotecaligier.com/media/catalog/product/cache/73269a27812eefec516431430aa0b457/w/c/wc_platinum.jpg',
-  IMAGEN_BLACK:    'https://vinotecaligier.com/media/catalog/product/cache/73269a27812eefec516431430aa0b457/w/c/wc_black.jpg',
-};
-
 const TEMPLATES = {
   'vinos':           'base-email-vinos.html',
   'whisky':          'base-email-whisky.html',
-  'espirituosas':    'base-email-vinos.html',
+  'espirituosas':    'base-email-whisky.html',
   'vinos-guardados': 'base-email-guardados.html',
   'wine-club':       'base-email-vinos.html',
   'experiencias':    'base-email-vinos.html',
   'gift-cards':      'base-email-vinos.html',
 };
 
-const HERO_TITLES = {
-  'vinos': [
-    'Esta semana,<br>elegimos seis.',
-    'Difícil<br>quedarse<br>con uno solo.',
-    'Seis etiquetas<br>que conocemos<br>de memoria.',
-    'Los que<br>guardamos<br>para vos.',
-    'Una selección<br>que vale<br>cada peso.',
-  ],
-  'whisky': [
-    'Destilados<br>que cuentan<br>su historia.',
-    'Single malts<br>y blends<br>de carácter.',
-    'Esta semana,<br>elegimos<br>lo mejor.',
-  ],
-  'vinos-guardados': [
-    'Algunos vinos<br>no vuelven.',
-    'El tiempo<br>hizo el trabajo.',
-    'Una cava.<br>Décadas.<br>Esta selección.',
-    'Lo que el tiempo<br>construyó.',
-    'Botellas que<br>ya no se repiten.',
-  ],
-  'espirituosas': [
-    'Para armar<br>tu barra<br>en serio.',
-    'Alta graduación,<br>carácter propio.',
-  ],
+// Wine club membership url_keys for Magento lookup
+const MEMBERSHIP_KEYS = {
+  IMAGEN_SILVER:   'wine-club-silver',
+  IMAGEN_GOLD:     'wine-club-gold',
+  IMAGEN_PLATINUM: 'wine-club-platinum',
+  IMAGEN_BLACK:    'wine-club-black-1',
 };
 
 async function fetchWithTimeout(url, options = {}, timeout = 8000) {
@@ -59,38 +33,63 @@ async function fetchWithTimeout(url, options = {}, timeout = 8000) {
   }
 }
 
+const MAGENTO_BASE = process.env.MAGENTO_BASE_URL || 'https://vinotecaligier.com';
+const MAGENTO_TOKEN = process.env.MAGENTO_ACCESS_TOKEN;
+
 async function getMagentoProduct(sku) {
-  const baseUrl = process.env.MAGENTO_BASE_URL || 'https://vinotecaligier.com';
-  const token = process.env.MAGENTO_ACCESS_TOKEN;
   try {
     const res = await fetchWithTimeout(
-      `${baseUrl}/rest/V1/products/${encodeURIComponent(sku)}`,
-      { headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } },
+      `${MAGENTO_BASE}/rest/V1/products/${encodeURIComponent(sku)}`,
+      { headers: { 'Authorization': `Bearer ${MAGENTO_TOKEN}`, 'Content-Type': 'application/json' } },
       8000
     );
     if (!res.ok) return null;
     const data = await res.json();
-    const price = data.price;
-    const mediaEntries = data.media_gallery_entries || [];
-    const mainImage = mediaEntries.find(e => e.types?.includes('image')) || mediaEntries[0];
-    const image = mainImage ? `${baseUrl}/media/catalog/product${mainImage.file}` : null;
-    const shortDesc = data.custom_attributes?.find(a => a.attribute_code === 'short_description');
-    const description = shortDesc ? shortDesc.value.replace(/<[^>]+>/g, '').trim().slice(0, 200) : '';
-    const urlKey = data.custom_attributes?.find(a => a.attribute_code === 'url_key');
-    const productUrl = urlKey ? `${baseUrl}/${urlKey.value}.html` : `${baseUrl}/catalogsearch/result/?q=${sku}`;
-    return { sku, name: data.name, price, image, description, url: productUrl, inStock: data.status === 1 };
+    return parseMagentoProduct(data);
   } catch(e) {
-    console.error('Magento error for SKU', sku, ':', e.message);
+    console.error('Magento product error', sku, e.message);
     return null;
   }
 }
 
-function buildProductBlock(product, index, isLast, tipo) {
-  const hasPromo = ['vinos', 'espirituosas'].includes(tipo);
+async function getMagentoProductByUrlKey(urlKey) {
+  try {
+    const url = `${MAGENTO_BASE}/rest/V1/products?searchCriteria[filterGroups][0][filters][0][field]=url_key&searchCriteria[filterGroups][0][filters][0][value]=${urlKey}&searchCriteria[pageSize]=1`;
+    const res = await fetchWithTimeout(url, { headers: { 'Authorization': `Bearer ${MAGENTO_TOKEN}` } }, 6000);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const item = data.items?.[0];
+    return item ? parseMagentoProduct(item) : null;
+  } catch(e) { return null; }
+}
+
+function parseMagentoProduct(data) {
+  const price = data.price;
+  const mediaEntries = data.media_gallery_entries || [];
+  const mainImage = mediaEntries.find(e => e.types?.includes('image')) || mediaEntries[0];
+  const image = mainImage ? `${MAGENTO_BASE}/media/catalog/product${mainImage.file}` : null;
+  const attr = (code) => data.custom_attributes?.find(a => a.attribute_code === code)?.value;
+  const shortDesc = attr('short_description') || attr('description') || '';
+  const description = shortDesc.replace(/<[^>]+>/g, '').trim().slice(0, 200);
+  const urlKey = attr('url_key');
+  const productUrl = urlKey ? `${MAGENTO_BASE}/${urlKey}.html` : `${MAGENTO_BASE}/catalogsearch/result/?q=${data.sku}`;
+  return { sku: data.sku, name: data.name, price, image, description, url: productUrl, inStock: data.status === 1 };
+}
+
+async function getCartTotal(cartUrl) {
+  try {
+    const res = await fetchWithTimeout(cartUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } }, 8000);
+    const html = await res.text();
+    const grandTotal = html.match(/class="grand totals"[\s\S]*?class="price"[^>]*>([^<]+)<\/span>/);
+    if (grandTotal) return grandTotal[1].trim();
+    const allPrices = html.match(/\$[\d]{2,3}(?:\.[\d]{3})+/g);
+    return allPrices ? allPrices[allPrices.length - 1] : null;
+  } catch(e) { return null; }
+}
+
+function buildProductBlock(product, index, isLast, showPromo, isGuardados) {
   const price = product.price ? parseFloat(product.price) : 0;
-  const promoPrice = Math.round(price * 5 / 6);
   const priceFormatted = price.toLocaleString('es-AR');
-  const promoPriceFormatted = promoPrice.toLocaleString('es-AR');
 
   const separator = isLast ? '' : `
         <tr><td colspan="2" style="padding-bottom:0;">
@@ -100,11 +99,18 @@ function buildProductBlock(product, index, isLast, tipo) {
           </table>
         </td></tr>`;
 
-  const priceBlock = hasPromo ? `
+  let priceBlock;
+  if (showPromo) {
+    const promoPrice = Math.round(price * 5 / 6).toLocaleString('es-AR');
+    priceBlock = `
             <p style="font-size:12px; color:#aaa; text-decoration:line-through; margin:0 0 2px 0;">$${priceFormatted}</p>
-            <p style="font-size:22px; font-weight:700; color:#111; line-height:1; margin:0 0 2px 0;">$${promoPriceFormatted}</p>
-            <p style="font-size:9px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:#888; margin:0 0 10px 0;">c/u comprando 6</p>` :
-    `<p style="font-size:18px; font-weight:700; color:#111; margin:0 0 14px 0;">$${priceFormatted}</p>`;
+            <p style="font-size:22px; font-weight:700; color:#111; line-height:1; margin:0 0 2px 0;">$${promoPrice}</p>
+            <p style="font-size:9px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:#888; margin:0 0 10px 0;">c/u comprando 6</p>`;
+  } else {
+    priceBlock = `<p style="font-size:18px; font-weight:700; color:#111; margin:0 0 14px 0;">$${priceFormatted}</p>`;
+  }
+
+  const label = isGuardados ? '[CEPA] · [REGIÓN] · [AÑO COSECHA]' : '[CEPA] · [REGIÓN] · [PROVINCIA]';
 
   return `
       <!-- Producto ${index + 1} -->
@@ -116,7 +122,7 @@ function buildProductBlock(product, index, isLast, tipo) {
             </a>
           </td>
           <td valign="middle" style="padding-bottom:24px;">
-            <p style="font-size:9px; font-weight:700; letter-spacing:2px; color:#aaa; text-transform:uppercase; margin:0 0 5px 0;">[CEPA] · [REGIÓN] · [PROVINCIA]</p>
+            <p style="font-size:9px; font-weight:700; letter-spacing:2px; color:#aaa; text-transform:uppercase; margin:0 0 5px 0;">${label}</p>
             <p style="font-size:14px; font-weight:700; color:#111; margin:0 0 6px 0;">
               <a href="${product.url}" target="_blank" style="color:#111;">${product.name}</a>
             </p>
@@ -128,55 +134,66 @@ function buildProductBlock(product, index, isLast, tipo) {
       </table>`;
 }
 
-function injectProductsIntoTemplate(template, products, cartLink, cartTotal, tipo, mes, titulo) {
-  let result = template;
+function buildAccessoryBlock(acc) {
+  return `
+            <p style="font-size:9px; font-weight:700; letter-spacing:2px; color:#aaa; text-transform:uppercase; margin:0 0 5px 0;">ACCESORIO</p>
+            <p style="font-size:14px; font-weight:700; color:#111; margin:0 0 6px 0;">
+              <a href="${acc.url}" target="_blank" style="color:#111;">${acc.name}</a>
+            </p>
+            <p style="font-size:13px; color:#888; line-height:1.5; margin:0 0 10px 0;">${acc.description || ''}</p>
+            <p style="font-size:16px; font-weight:700; color:#111; margin:0 0 12px 0;">$${acc.price ? parseFloat(acc.price).toLocaleString('es-AR') : ''}</p>
+            <a href="${acc.url}" target="_blank" style="display:inline-block; background:transparent; border:1.5px solid #111; color:#111; font-size:10px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; padding:9px 18px; text-decoration:none;">VER PRODUCTO</a>`;
+}
 
-  // 1. Update eyebrow - just category, no mes/año for guardados
-  const eyebrowText = tipo === 'vinos-guardados' 
+function injectIntoTemplate(template, opts) {
+  const { products, accessory, cartLink, cartTotal, tipo, mes, titulo } = opts;
+  let result = template;
+  const showPromo = tipo === 'vinos';
+  const isGuardados = tipo === 'vinos-guardados';
+
+  // 1. Eyebrow
+  const eyebrowText = isGuardados
     ? 'VINOS GUARDADOS · LIGIER'
     : `${tipo.toUpperCase().replace(/-/g, ' ')} · ${mes.toUpperCase()}`;
-  // Replace both possible eyebrow colors (#666 and rgba overlay)
-  result = result.replace(
-    /(<p[^>]*color:#666[^>]*>)[^<]+(·[^<]+)?(<\/p>)/,
-    `$1${eyebrowText}$3`
-  );
-  result = result.replace(
-    /(<p[^>]*rgba\(255,255,255,0\.5\)[^>]*>)[^<]+(·[^<]+)?(<\/p>)/,
-    `$1${eyebrowText}$3`
-  );
+  result = result.replace(/(<p[^>]*color:#666[^>]*>)[^<]+(<\/p>)/, `$1${eyebrowText}$2`);
+  result = result.replace(/(<p[^>]*rgba\(255,255,255,0\.5\)[^>]*>)[^<]+(<\/p>)/, `$1${eyebrowText}$2`);
 
-  // 2. Update hero H1 with selected title
-  const title = titulo ? titulo.replace(/\n/g, '<br>') : (HERO_TITLES[tipo] || HERO_TITLES['vinos'])[0].replace(/\n/g, '<br>');
-  result = result.replace(
-    /(<h1[^>]*>)[\s\S]*?(<\/h1>)/,
-    `<h1 class="hero-h1" style="font-size:34px; font-weight:700; letter-spacing:-1px; color:#ffffff; margin:0 0 16px 0; line-height:1.15;">${title}</h1>`
-  );
+  // 2. Hero H1
+  if (titulo) {
+    const titleHtml = titulo.replace(/\n/g, '<br>');
+    result = result.replace(/(<h1[^>]*class="hero-h1"[^>]*>)[\s\S]*?(<\/h1>)/, `$1${titleHtml}$2`);
+  }
 
-  // 3. Replace products section
+  // 3. Products
   const prodStart = result.indexOf('<!-- Producto 1 -->');
-  // Try 4b first, then 5, then ACCESORIO as fallback
   let prodEnd = result.indexOf('<!-- ── 4b.');
   if (prodEnd === -1) prodEnd = result.indexOf('<!-- ── 5.');
   if (prodEnd === -1) prodEnd = result.indexOf('<!-- ── WINE CLUB');
+  if (prodEnd === -1) prodEnd = result.indexOf('<!-- ── CUOTAS');
   if (prodStart !== -1 && prodEnd !== -1) {
-    const productsHtml = products.map((p, i) => buildProductBlock(p, i, i === products.length - 1, tipo)).join('\n');
+    const productsHtml = products.map((p, i) => buildProductBlock(p, i, i === products.length - 1, showPromo, isGuardados)).join('\n');
     result = result.substring(0, prodStart) + productsHtml + '\n    ' + result.substring(prodEnd);
-    console.log('Products injected:', products.length);
-  } else {
-    console.error('Could not find injection points. prodStart:', prodStart, 'prodEnd:', prodEnd);
   }
 
-  // 4. Update cart links
+  // 4. Accessory (replace the accessory info block if accessory provided)
+  if (accessory) {
+    // Match accessory section content between label and button
+    const accBlock = buildAccessoryBlock(accessory);
+    // Replace image
+    result = result.replace(
+      /(<!-- ── 5\. ACCESORIO[\s\S]*?<img src=")[^"]*(")/,
+      `$1${accessory.image || ''}$2`
+    );
+  }
+
+  // 5. Cart links
   if (cartLink) {
     result = result.replace(/https:\/\/vinotecaligier\.com\/compartircarrito\/index\/share\/data\/[^"]+/g, cartLink);
   }
 
-  // 5. Update cart total
+  // 6. Cart total
   if (cartTotal) {
-    result = result.replace(
-      /Total 6x5: \$[\d\.,]+/g,
-      `Total 6x5: ${cartTotal}`
-    );
+    result = result.replace(/Total 6x5: \$[\d\.,]+/g, `Total 6x5: ${cartTotal}`);
   }
 
   return result;
@@ -187,80 +204,88 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { tipo, seleccion, carrito, urls, rango, dia, hora, notas, titulo, accesorio, accesorioUrl, tienePromo, modo, emailPrueba } = req.body;
+  const { tipo, seleccion, carrito, urls, dia, hora, titulo, accesorio, accesorioUrl, modo, emailPrueba } = req.body;
   const mes = new Date().toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
 
   try {
-    // ── Step 1: Load template from GitHub ──
+    // 1. Load template
     const templateFile = TEMPLATES[tipo] || 'base-email-vinos.html';
     const templateRes = await fetchWithTimeout(GITHUB_RAW + templateFile, {}, 8000);
     if (!templateRes.ok) throw new Error('No se pudo cargar el template');
-    const baseTemplate = await templateRes.text();
+    let baseTemplate = await templateRes.text();
 
-    // ── Step 2: Get SKUs from cart link ──
+    // 2. Get SKUs
     let skuList = [];
     let cartLink = carrito?.trim();
-
     if (seleccion === 'carrito' && cartLink) {
       const base64 = cartLink.split('/data/')[1]?.replace(/\/$/, '');
       if (base64) {
-        try {
-          skuList = JSON.parse(Buffer.from(base64, 'base64').toString());
-        } catch(e) {}
+        try { skuList = JSON.parse(Buffer.from(base64, 'base64').toString()); } catch(e) {}
+      }
+    } else if (seleccion === 'urls' && urls) {
+      // Extract url_keys from URLs
+      const urlList = urls.split('\n').map(u => u.trim()).filter(u => u.startsWith('http'));
+      const products = [];
+      for (const u of urlList) {
+        const urlKey = u.split('/').pop().replace('.html', '');
+        const p = await getMagentoProductByUrlKey(urlKey);
+        if (p) products.push(p);
+      }
+      if (products.length > 0) {
+        // jump straight to building
+        var directProducts = products;
       }
     }
 
-    // ── Step 3: Get product data from Magento API ──
+    // 3. Get products from Magento
     let products = [];
-    if (skuList.length > 0) {
+    if (typeof directProducts !== 'undefined') {
+      products = directProducts;
+    } else if (skuList.length > 0) {
       const results = await Promise.all(skuList.map(s => getMagentoProduct(s.sku)));
       products = results.filter(p => p && p.inStock && p.image);
-      console.log(`Got ${products.length} products from Magento`);
     }
 
     if (products.length === 0) {
-      return res.status(400).json({ error: 'No se pudieron obtener los productos del carrito. Verificá el link.' });
+      return res.status(400).json({ error: 'No se pudieron obtener los productos. Verificá el link del carrito o las URLs.' });
     }
 
-    // ── Step 4: Get cart total ──
+    // 4. Get accessory (manual only)
+    let accessory = null;
+    if (accesorio === 'manual' && accesorioUrl) {
+      const accKey = accesorioUrl.split('/').pop().replace('.html', '');
+      accessory = await getMagentoProductByUrlKey(accKey);
+    }
+
+    // 5. Cart total (only for vinos)
     let cartTotal = null;
-    if (cartLink) {
-      try {
-        const cartRes = await fetchWithTimeout(cartLink, { headers: { 'User-Agent': 'Mozilla/5.0' } }, 8000);
-        const cartHtml = await cartRes.text();
-        // Extract grand total from Magento cart: <tr class="grand totals"> > <span class="price">
-        const grandTotal = cartHtml.match(/class="grand totals"[\s\S]*?class="price"[^>]*>([^<]+)<\/span>/);
-        if (grandTotal) {
-          cartTotal = grandTotal[1].trim();
-        } else {
-          // Fallback: last price on the page
-          const allPrices = cartHtml.match(/\$[\d]{2,3}(?:\.[\d]{3})+/g);
-          cartTotal = allPrices ? allPrices[allPrices.length - 1] : null;
-        }
-      } catch(e) {}
+    if (tipo === 'vinos' && cartLink) {
+      cartTotal = await getCartTotal(cartLink);
+      if (!cartTotal) cartTotal = await getCartTotal(cartLink);
     }
 
-    // ── Step 5: Inject products into template ──
-    const emailHtml = injectProductsIntoTemplate(baseTemplate, products, cartLink, cartTotal, tipo, mes, titulo);
+    // 6. Membership images for guardados (from Magento)
+    if (tipo === 'vinos-guardados') {
+      for (const [placeholder, urlKey] of Object.entries(MEMBERSHIP_KEYS)) {
+        const memProduct = await getMagentoProductByUrlKey(urlKey);
+        const imgUrl = memProduct?.image || '';
+        baseTemplate = baseTemplate.replace(new RegExp(placeholder, 'g'), imgUrl);
+      }
+    }
 
+    // 7. Inject everything
+    const emailHtml = injectIntoTemplate(baseTemplate, { products, accessory, cartLink, cartTotal, tipo, mes, titulo });
     if (!emailHtml.includes('<!DOCTYPE')) {
       return res.status(500).json({ error: 'Error generando el email' });
     }
 
-    // Replace membership image placeholders
-    let finalHtml = emailHtml;
-    Object.entries(MEMBERSHIP_IMAGES).forEach(([placeholder, url]) => {
-      finalHtml = finalHtml.replace(new RegExp(placeholder, 'g'), url);
-    });
-
-    // ── Step 6: Create Mailchimp campaign ──
+    // 8. Mailchimp
     const mcKey = process.env.MAILCHIMP_API_KEY;
     const dc = mcKey.split('-').pop();
     const audienceId = process.env.MAILCHIMP_AUDIENCE_ID;
     const mcBase = `https://${dc}.api.mailchimp.com/3.0`;
     const mcAuth = 'Basic ' + Buffer.from(`anystring:${mcKey}`).toString('base64');
     const mcHeaders = { 'Authorization': mcAuth, 'Content-Type': 'application/json' };
-
     const campaignTitle = `Ligier · ${tipo} · ${dia} ${mes}`;
 
     const createRes = await fetch(`${mcBase}/campaigns`, {
@@ -268,24 +293,16 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         type: 'regular',
         recipients: { list_id: audienceId },
-        settings: {
-          subject_line: `Nueva selección ${mes} — Ligier`,
-          from_name: 'Ligier',
-          reply_to: 'ventas@ligier.com.ar',
-          title: campaignTitle
-        }
+        settings: { subject_line: `Nueva selección ${mes} — Ligier`, from_name: 'Ligier', reply_to: 'ventas@ligier.com.ar', title: campaignTitle }
       })
     });
-
     const campaign = await createRes.json();
     if (!campaign.id) return res.status(500).json({ error: 'Error Mailchimp', detail: JSON.stringify(campaign) });
 
     await fetch(`${mcBase}/campaigns/${campaign.id}/content`, {
-      method: 'PUT', headers: mcHeaders,
-      body: JSON.stringify({ html: finalHtml })
+      method: 'PUT', headers: mcHeaders, body: JSON.stringify({ html: emailHtml })
     });
 
-    // Send test email
     const testEmail = emailPrueba || 'dayanmartin@gmail.com';
     await fetch(`${mcBase}/campaigns/${campaign.id}/actions/test`, {
       method: 'POST', headers: mcHeaders,
@@ -305,8 +322,7 @@ export default async function handler(req, res) {
       const utcDate = new Date(sendDate.getTime() + 3 * 60 * 60 * 1000);
       scheduleTime = utcDate.toISOString().replace('.000Z', '+00:00');
       await fetch(`${mcBase}/campaigns/${campaign.id}/actions/schedule`, {
-        method: 'POST', headers: mcHeaders,
-        body: JSON.stringify({ schedule_time: scheduleTime })
+        method: 'POST', headers: mcHeaders, body: JSON.stringify({ schedule_time: scheduleTime })
       });
     }
 
@@ -317,8 +333,8 @@ export default async function handler(req, res) {
       scheduleTime,
       isDraft: modo === 'borrador',
       testEmail,
-      webId: campaign.web_id,
       productsFound: products.length,
+      webId: campaign.web_id,
       mailchimpUrl: `https://mc.us1.mailchimp.com/campaigns/show?id=${campaign.web_id}`
     });
 
