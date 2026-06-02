@@ -164,6 +164,11 @@ function injectIntoTemplate(template, opts) {
     result = result.replace(/(<h1[^>]*class="hero-h1"[^>]*>)[\s\S]*?(<\/h1>)/, `$1${titleHtml}$2`);
   }
 
+  // 2b. Hero bajada (subtitle under H1)
+  if (opts.bajada) {
+    result = result.replace(/(<p[^>]*class="hero-bajada"[^>]*>)[\s\S]*?(<\/p>)/, `$1${opts.bajada}$2`);
+  }
+
   // 3. Products
   const prodStart = result.indexOf('<!-- Producto 1 -->');
   let prodEnd = result.indexOf('<!-- ── 4b.');
@@ -175,15 +180,37 @@ function injectIntoTemplate(template, opts) {
     result = result.substring(0, prodStart) + productsHtml + '\n    ' + result.substring(prodEnd);
   }
 
-  // 4. Accessory (replace the accessory info block if accessory provided)
+  // 4. Accessory
   if (accessory) {
-    // Match accessory section content between label and button
-    const accBlock = buildAccessoryBlock(accessory);
-    // Replace image
+    // Replace image, name, description, price and links in the accessory section
     result = result.replace(
-      /(<!-- ── 5\. ACCESORIO[\s\S]*?<img src=")[^"]*(")/,
+      /(<!-- ACC_START -->[\s\S]*?<img src=")[^"]*(")/,
       `$1${accessory.image || ''}$2`
     );
+    // Replace accessory name (first product-name link inside ACC section)
+    const accName = accessory.name || '';
+    const accPrice = accessory.price ? '$' + parseFloat(accessory.price).toLocaleString('es-AR') : '';
+    const accDesc = accessory.description || '';
+    const accUrl = accessory.url || '#';
+    // Rebuild the inner info block between ACC_START and ACC_END
+    result = result.replace(
+      /(<!-- ACC_START -->[\s\S]*?<td valign="middle">)[\s\S]*?(<\/td>\s*<\/tr>\s*<\/table>)/,
+      `$1
+            <p style="font-size:9px; font-weight:700; letter-spacing:2px; color:#aaa; text-transform:uppercase; margin:0 0 5px 0;">ACCESORIO</p>
+            <p style="font-size:14px; font-weight:700; color:#111; margin:0 0 6px 0;"><a href="${accUrl}" target="_blank" style="color:#111;">${accName}</a></p>
+            <p style="font-size:13px; color:#888; line-height:1.5; margin:0 0 10px 0;">${accDesc}</p>
+            <p style="font-size:16px; font-weight:700; color:#111; margin:0 0 14px 0;">${accPrice}</p>
+            <a href="${accUrl}" target="_blank" style="display:inline-block; background:transparent; border:1.5px solid #111111; color:#111111; font-size:10px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; padding:9px 18px;">VER PRODUCTO</a>
+          $2`
+    );
+    // Fix accessory link in image too
+    result = result.replace(
+      /(<!-- ACC_START -->[\s\S]*?<a href=")[^"]*(" target="_blank">\s*<img)/,
+      `$1${accUrl}$2`
+    );
+  } else {
+    // No accessory chosen — remove the whole section
+    result = result.replace(/<!-- ACC_START -->[\s\S]*?<!-- ACC_END -->/, '');
   }
 
   // 5. Cart links
@@ -191,9 +218,9 @@ function injectIntoTemplate(template, opts) {
     result = result.replace(/https:\/\/vinotecaligier\.com\/compartircarrito\/index\/share\/data\/[^"]+/g, cartLink);
   }
 
-  // 6. Cart total
+  // 6. Pack total — replace the value inside the pack-total paragraph
   if (cartTotal) {
-    result = result.replace(/Total 6x5: \$[\d\.,]+/g, `Total 6x5: ${cartTotal}`);
+    result = result.replace(/(<p[^>]*class="pack-total"[^>]*>)[\s\S]*?(<\/p>)/, `$1${cartTotal}$2`);
   }
 
   return result;
@@ -204,8 +231,17 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { tipo, seleccion, carrito, urls, dia, hora, titulo, accesorio, accesorioUrl, modo, emailPrueba } = req.body;
+  const { tipo, seleccion, carrito, urls, dia, hora, titulo, bajada, accesorio, accesorioUrl, modo, emailPrueba } = req.body;
   const mes = new Date().toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
+
+  // Default bajada per type (used if user doesn't provide one)
+  const BAJADAS = {
+    'vinos': 'Una selección para descubrir esta semana.<br>Llevá 6, pagá 5.',
+    'whisky': 'Destilados que elegimos uno por uno.',
+    'espirituosas': 'Para armar tu barra con criterio.',
+    'vinos-guardados': 'Botellas que el tiempo hizo únicas.',
+  };
+  const bajadaFinal = (bajada || BAJADAS[tipo] || '').replace(/\n/g, '<br>');
 
   try {
     // 1. Load template
@@ -279,7 +315,7 @@ export default async function handler(req, res) {
     }
 
     // 7. Inject everything
-    const emailHtml = injectIntoTemplate(baseTemplate, { products, accessory, cartLink, cartTotal, tipo, mes, titulo });
+    const emailHtml = injectIntoTemplate(baseTemplate, { products, accessory, cartLink, cartTotal, tipo, mes, titulo, bajada: bajadaFinal });
     if (!emailHtml.includes('<!DOCTYPE')) {
       return res.status(500).json({ error: 'Error generando el email' });
     }
