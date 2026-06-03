@@ -219,18 +219,22 @@ function injectIntoTemplate(template, opts) {
   const eyebrowText = isGuardados
     ? 'VINOS GUARDADOS · LIGIER'
     : `${tipo.toUpperCase().replace(/-/g, ' ')} · ${mes.toUpperCase()}`;
-  result = result.replace(/(<p[^>]*color:#666[^>]*>)[^<]+(<\/p>)/, `$1${eyebrowText}$2`);
-  result = result.replace(/(<p[^>]*rgba\(255,255,255,0\.5\)[^>]*>)[^<]+(<\/p>)/, `$1${eyebrowText}$2`);
+  // Nota: usamos funciones de reemplazo (m,p1,p2)=>p1+valor+p2 en vez de strings
+  // "$1...$2". Si el valor inyectado contiene un "$" (ej. precios "$108.858"),
+  // String.replace interpretaría "$1" como referencia de grupo y comería el dígito.
+  // Con función, el string devuelto se usa literal y el bug desaparece.
+  result = result.replace(/(<p[^>]*color:#666[^>]*>)[^<]+(<\/p>)/, (m, p1, p2) => p1 + eyebrowText + p2);
+  result = result.replace(/(<p[^>]*rgba\(255,255,255,0\.5\)[^>]*>)[^<]+(<\/p>)/, (m, p1, p2) => p1 + eyebrowText + p2);
 
   // 2. Hero H1
   if (titulo) {
     const titleHtml = titulo.replace(/\n/g, '<br>');
-    result = result.replace(/(<h1[^>]*class="hero-h1"[^>]*>)[\s\S]*?(<\/h1>)/, `$1${titleHtml}$2`);
+    result = result.replace(/(<h1[^>]*class="hero-h1"[^>]*>)[\s\S]*?(<\/h1>)/, (m, p1, p2) => p1 + titleHtml + p2);
   }
 
   // 2b. Hero bajada (subtitle under H1)
   if (opts.bajada) {
-    result = result.replace(/(<p[^>]*class="hero-bajada"[^>]*>)[\s\S]*?(<\/p>)/, `$1${opts.bajada}$2`);
+    result = result.replace(/(<p[^>]*class="hero-bajada"[^>]*>)[\s\S]*?(<\/p>)/, (m, p1, p2) => p1 + opts.bajada + p2);
   }
 
   // 3. Products
@@ -249,28 +253,29 @@ function injectIntoTemplate(template, opts) {
     // Replace image, name, description, price and links in the accessory section
     result = result.replace(
       /(<!-- ACC_START -->[\s\S]*?<img src=")[^"]*(")/,
-      `$1${accessory.image || ''}$2`
+      (m, p1, p2) => p1 + (accessory.image || '') + p2
     );
     // Replace accessory name (first product-name link inside ACC section)
     const accName = accessory.name || '';
     const accPrice = accessory.price ? '$' + parseFloat(accessory.price).toLocaleString('es-AR') : '';
     const accDesc = accessory.description || '';
     const accUrl = accessory.url || '#';
-    // Rebuild the inner info block between ACC_START and ACC_END
+    // Rebuild the inner info block entre ACC_START y ACC_END (función de reemplazo:
+    // accPrice contiene "$", así que con string "$1...$2" se comería un dígito).
     result = result.replace(
       /(<!-- ACC_START -->[\s\S]*?<td valign="middle">)[\s\S]*?(<\/td>\s*<\/tr>\s*<\/table>)/,
-      `$1
+      (m, p1, p2) => p1 + `
             <p style="font-size:9px; font-weight:700; letter-spacing:2px; color:#aaa; text-transform:uppercase; margin:0 0 5px 0;">ACCESORIO</p>
             <p style="font-size:14px; font-weight:700; color:#111; margin:0 0 6px 0;"><a href="${accUrl}" target="_blank" style="color:#111;">${accName}</a></p>
             <p style="font-size:13px; color:#888; line-height:1.5; margin:0 0 10px 0;">${accDesc}</p>
             <p style="font-size:16px; font-weight:700; color:#111; margin:0 0 14px 0;">${accPrice}</p>
             <a href="${accUrl}" target="_blank" style="display:inline-block; background:transparent; border:1.5px solid #111111; color:#111111; font-size:10px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; padding:9px 18px;">VER PRODUCTO</a>
-          $2`
+          ` + p2
     );
     // Fix accessory link in image too
     result = result.replace(
       /(<!-- ACC_START -->[\s\S]*?<a href=")[^"]*(" target="_blank">\s*<img)/,
-      `$1${accUrl}$2`
+      (m, p1, p2) => p1 + accUrl + p2
     );
   } else {
     // No accessory chosen — remove the whole section
@@ -279,12 +284,12 @@ function injectIntoTemplate(template, opts) {
 
   // 5. Cart links
   if (cartLink) {
-    result = result.replace(/https:\/\/vinotecaligier\.com\/compartircarrito\/index\/share\/data\/[^"]+/g, cartLink);
+    result = result.replace(/https:\/\/vinotecaligier\.com\/compartircarrito\/index\/share\/data\/[^"]+/g, () => cartLink);
   }
 
-  // 6. Pack total — replace the value inside the pack-total paragraph
+  // 6. Pack total — el valor (ej. "$108.858") contiene "$", así que va por función
   if (cartTotal) {
-    result = result.replace(/(<p[^>]*class="pack-total"[^>]*>)[\s\S]*?(<\/p>)/, `$1${cartTotal}$2`);
+    result = result.replace(/(<p[^>]*class="pack-total"[^>]*>)[\s\S]*?(<\/p>)/, (m, p1, p2) => p1 + cartTotal + p2);
   }
 
   // 7. Preheader — replace the visible text inside the hidden preheader div,
@@ -293,7 +298,7 @@ function injectIntoTemplate(template, opts) {
   if (opts.preheader) {
     result = result.replace(
       /(<div class="preheader"[^>]*>)[\s\S]*?(\s*(?:&#847;|&zwnj;|&nbsp;)[\s\S]*?<\/div>)/,
-      `$1\n  ${opts.preheader}$2`
+      (m, p1, p2) => p1 + '\n  ' + opts.preheader + p2
     );
   }
 
