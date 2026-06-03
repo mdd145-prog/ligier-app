@@ -383,6 +383,14 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'No se pudieron obtener los productos. Verificá el link del carrito o las URLs.' });
     }
 
+    // Si la selección vino por URLs (sin cartLink explícito), armamos el link de
+    // carrito compartido con los SKUs resueltos, para que los botones de pack/promo
+    // (vinos) abran exactamente esta selección y no el carrito de ejemplo del template.
+    if (!cartLink && products.length) {
+      const base = JSON.stringify(products.map(p => ({ sku: p.sku, qty: 1 })));
+      cartLink = `${MAGENTO_BASE}/compartircarrito/index/share/data/${Buffer.from(base).toString('base64')}/`;
+    }
+
     // 4. Get accessory (manual only)
     let accessory = null;
     if (accesorio === 'manual' && accesorioUrl) {
