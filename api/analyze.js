@@ -45,6 +45,12 @@ export default async function handler(req, res) {
           click_rate: report.clicks?.click_rate || 0,
           revenue: report.ecommerce?.total_revenue || 0,
           orders: report.ecommerce?.total_orders || 0,
+          // Métricas de engagement y deliverability (antes se descartaban)
+          unique_opens: report.opens?.unique_opens || 0,
+          unique_clicks: report.clicks?.unique_clicks || 0,
+          bounces: (report.bounces?.hard_bounces || 0) + (report.bounces?.soft_bounces || 0),
+          unsubscribed: report.unsubscribed || 0,
+          abuse: report.abuse_reports || 0,
         };
       } catch(e) { return null; }
     }));
@@ -58,6 +64,26 @@ export default async function handler(req, res) {
     // 3. Aggregate by dimension
     const avg = (arr, key) => arr.length ? arr.reduce((s,x) => s + x[key], 0) / arr.length : 0;
     const sum = (arr, key) => arr.reduce((s,x) => s + x[key], 0);
+    const pct = (num, den) => den ? +((num / den) * 100).toFixed(2) : 0;
+
+    // CTOR = clicks únicos / aperturas únicas. Más fiable que el click_rate puro
+    // post Apple MPP (que infla las aperturas). Revenue por email normaliza envíos
+    // de distinto tamaño. Bounce/unsub/abuse son las métricas que predicen daño
+    // a la reputación de envío.
+    const metrics = (items) => {
+      const sent = sum(items, 'emails_sent');
+      return {
+        open_rate: +(avg(items, 'open_rate') * 100).toFixed(1),
+        click_rate: +(avg(items, 'click_rate') * 100).toFixed(1),
+        ctor: pct(sum(items, 'unique_clicks'), sum(items, 'unique_opens')),
+        revenue: +sum(items, 'revenue').toFixed(0),
+        revenue_por_email: +(sent ? sum(items, 'revenue') / sent : 0).toFixed(1),
+        orders: sum(items, 'orders'),
+        bounce_rate: pct(sum(items, 'bounces'), sent),
+        unsub_rate: pct(sum(items, 'unsubscribed'), sent),
+        abuse_rate: pct(sum(items, 'abuse'), sent),
+      };
+    };
 
     const groupBy = (key) => {
       const groups = {};
@@ -70,11 +96,8 @@ export default async function handler(req, res) {
       return Object.entries(groups).map(([name, items]) => ({
         name,
         count: items.length,
-        open_rate: +(avg(items, 'open_rate') * 100).toFixed(1),
-        click_rate: +(avg(items, 'click_rate') * 100).toFixed(1),
-        revenue: +sum(items, 'revenue').toFixed(0),
-        orders: sum(items, 'orders'),
-      })).sort((a,b) => b.click_rate - a.click_rate);
+        ...metrics(items),
+      })).sort((a,b) => b.ctor - a.ctor);
     };
 
     const byTipo = groupBy('tipo');
@@ -91,30 +114,42 @@ export default async function handler(req, res) {
     if (byHora.length) recommendations.mejorHora = byHora.sort((a,b) => b.open_rate - a.open_rate)[0].name;
 
     // 5. Overall stats
+    const om = metrics(valid);
     const overall = {
       campañas: valid.length,
-      apertura_promedio: +(avg(valid, 'open_rate') * 100).toFixed(1),
-      click_promedio: +(avg(valid, 'click_rate') * 100).toFixed(1),
-      revenue_total: +sum(valid, 'revenue').toFixed(0),
-      ordenes_total: sum(valid, 'orders'),
+      apertura_promedio: om.open_rate,
+      click_promedio: om.click_rate,
+      ctor: om.ctor,
+      revenue_total: om.revenue,
+      revenue_por_email: om.revenue_por_email,
+      ordenes_total: om.orders,
+      bounce_rate: om.bounce_rate,
+      unsub_rate: om.unsub_rate,
+      abuse_rate: om.abuse_rate,
     };
 
     // 6. Build human-readable insights
+    // Significancia mínima: no afirmar un patrón con menos de 3 campañas en el grupo.
+    const MIN = 3;
     const insights = [];
     if (byDia.length >= 2) {
       const best = [...byDia].sort((a,b)=>b.open_rate-a.open_rate)[0];
-      insights.push(`Los emails del ${best.name} tienen la mejor apertura (${best.open_rate}%).`);
+      if (best.count >= MIN) insights.push(`Los emails del ${best.name} tienen la mejor apertura (${best.open_rate}%).`);
     }
     if (byTipo.length >= 2) {
       const best = byTipo[0];
-      insights.push(`Los emails de ${best.name} generan más clicks (${best.click_rate}%).`);
-      const bestRev = [...byTipo].sort((a,b)=>b.revenue-a.revenue)[0];
-      if (bestRev.revenue > 0) insights.push(`${bestRev.name} es el que más ventas generó ($${bestRev.revenue.toLocaleString('es-AR')}).`);
+      if (best.count >= MIN) insights.push(`Los emails de ${best.name} generan más interacción (CTOR ${best.ctor}%).`);
+      const bestRev = [...byTipo].filter(t=>t.count>=MIN).sort((a,b)=>b.revenue_por_email-a.revenue_por_email)[0];
+      if (bestRev && bestRev.revenue_por_email > 0) insights.push(`${bestRev.name} es el que más factura por email enviado ($${bestRev.revenue_por_email.toLocaleString('es-AR')} c/u).`);
     }
     if (byHora.length >= 2) {
-      const best = byHora.sort((a,b)=>b.open_rate-a.open_rate)[0];
-      insights.push(`Enviar a las ${best.name} mejora la apertura.`);
+      const best = [...byHora].sort((a,b)=>b.open_rate-a.open_rate)[0];
+      if (best.count >= MIN) insights.push(`Enviar a las ${best.name} mejora la apertura.`);
     }
+    // Alertas de deliverability (sobre el total)
+    if (overall.unsub_rate > 0.5) insights.push(`⚠ La tasa de desuscripción (${overall.unsub_rate}%) está alta — revisá frecuencia y segmentación.`);
+    if (overall.abuse_rate > 0.08) insights.push(`⚠ Las quejas de spam (${overall.abuse_rate}%) están sobre el umbral seguro (0,08%).`);
+    if (overall.bounce_rate > 1) insights.push(`⚠ El rebote (${overall.bounce_rate}%) está alto — limpiá la lista de direcciones inválidas.`);
 
     return res.status(200).json({
       success: true,
