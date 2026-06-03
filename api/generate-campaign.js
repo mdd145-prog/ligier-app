@@ -127,8 +127,11 @@ async function parseMagentoProduct(data) {
   const bodega = await attrAny(['marca','bodega']);
   const anio = await attrAny(['ano','anio','add_year','year','vintage','cosecha']);
 
+  // Debug: códigos+valores crudos de los atributos (para descubrir los códigos reales)
+  const _attrs = (data.custom_attributes || []).map(a => ({ code: a.attribute_code, value: a.value }));
+
   return { sku: data.sku, name: data.name, price, image, description, url: productUrl,
-    inStock: data.status === 1, cepa, region, pais, bodega, anio };
+    inStock: data.status === 1, cepa, region, pais, bodega, anio, _attrs };
 }
 
 async function getCartTotal(cartUrl) {
@@ -423,6 +426,7 @@ export default async function handler(req, res) {
         subject: subjectFinal, preheader: preheaderFinal, cartTotal,
         productsFound: products.length,
         products: products.map(p => ({ name: p.name, cepa: p.cepa, region: p.region, pais: p.pais, bodega: p.bodega, anio: p.anio, price: p.price })),
+        rawAttrs: products[0]?._attrs || [],
         htmlLength: emailHtml.length,
         html: emailHtml,
       });
