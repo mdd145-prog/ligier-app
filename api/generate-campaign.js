@@ -396,11 +396,23 @@ export default async function handler(req, res) {
       cartLink = `${MAGENTO_BASE}/compartircarrito/index/share/data/${Buffer.from(base).toString('base64')}/`;
     }
 
-    // 4. Get accessory (manual only)
+    // 4. Get accessory
+    //    'manual'  → URL que pega el usuario
+    //    'ninguno' → sin accesorio
+    //    'auto' (o cualquier otro) → accesorio acorde al tipo (default curado)
+    const DEFAULT_ACCESSORIES = {
+      'vinos': 'riedel-veritas-cabernet-merlot-set-2',
+      'vinos-guardados': 'riedel-fatto-a-mano-pinot-noir-red',
+      'whisky': 'nachtmann-noblesse-whisky-set-4',
+      'espirituosas': 'nachtmann-noblesse-whisky-set-4',
+    };
     let accessory = null;
     if (accesorio === 'manual' && accesorioUrl) {
       const accKey = accesorioUrl.split('/').pop().replace('.html', '');
       accessory = await getMagentoProductByUrlKey(accKey);
+    } else if (accesorio !== 'ninguno') {
+      const defKey = DEFAULT_ACCESSORIES[tipo];
+      if (defKey) accessory = await getMagentoProductByUrlKey(defKey);
     }
 
     // 5. Pack total (only for vinos) — calculated like Magento's 6x5 MIX promo:
