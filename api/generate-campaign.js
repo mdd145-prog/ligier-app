@@ -45,7 +45,7 @@ async function getMagentoProduct(sku) {
     );
     if (!res.ok) return null;
     const data = await res.json();
-    return parseMagentoProduct(data);
+    return await parseMagentoProduct(data);
   } catch(e) {
     console.error('Magento product error', sku, e.message);
     return null;
@@ -59,11 +59,44 @@ async function getMagentoProductByUrlKey(urlKey) {
     if (!res.ok) return null;
     const data = await res.json();
     const item = data.items?.[0];
-    return item ? parseMagentoProduct(item) : null;
+    return item ? await parseMagentoProduct(item) : null;
   } catch(e) { return null; }
 }
 
-function parseMagentoProduct(data) {
+// Los atributos de tipo dropdown de Magento (variedad, país, etc.) vienen en la API
+// como ID de opción (un número), no como texto. Esto resuelve ID → label, con cache.
+const _optionCache = {};
+async function resolveOption(code, value) {
+  if (value == null || value === '') return null;
+  // Si ya es texto (no numérico), usarlo tal cual
+  if (typeof value === 'string' && !/^\d+$/.test(value.trim())) return value.trim();
+  try {
+    if (!_optionCache[code]) {
+      const res = await fetchWithTimeout(
+        `${MAGENTO_BASE}/rest/V1/products/attributes/${code}/options`,
+        { headers: { 'Authorization': `Bearer ${MAGENTO_TOKEN}` } }, 6000
+      );
+      _optionCache[code] = res.ok ? await res.json() : [];
+    }
+    const opt = _optionCache[code].find(o => String(o.value) === String(value));
+    const label = opt?.label?.trim();
+    return label && label !== '0' ? label : null;
+  } catch(e) { return null; }
+}
+
+// Cepas más comunes para detectar la variedad desde el nombre como último recurso
+const CEPAS = ['Malbec','Cabernet Franc','Cabernet Sauvignon','Cabernet','Merlot','Bonarda',
+  'Syrah','Petit Verdot','Tannat','Pinot Noir','Tempranillo','Sangiovese','Blend','Corte',
+  'Chardonnay','Sauvignon Blanc','Torrontés','Torrontes','Semillón','Semillon','Viognier',
+  'Riesling','Pinot Grigio','Gewürztraminer','Chenin','Rosé','Rosado'];
+function cepaFromName(name = '') {
+  return CEPAS.find(c => new RegExp(`\\b${c}\\b`, 'i').test(name)) || null;
+}
+
+const COUNTRY_CODES = { AR: 'Argentina', CL: 'Chile', FR: 'Francia', IT: 'Italia',
+  ES: 'España', US: 'Estados Unidos', UY: 'Uruguay', PT: 'Portugal', NZ: 'Nueva Zelanda' };
+
+async function parseMagentoProduct(data) {
   const price = data.price;
   const mediaEntries = data.media_gallery_entries || [];
   const mainImage = mediaEntries.find(e => e.types?.includes('image')) || mediaEntries[0];
@@ -73,7 +106,29 @@ function parseMagentoProduct(data) {
   const description = shortDesc.replace(/<[^>]+>/g, '').trim().slice(0, 200);
   const urlKey = attr('url_key');
   const productUrl = urlKey ? `${MAGENTO_BASE}/${urlKey}.html` : `${MAGENTO_BASE}/catalogsearch/result/?q=${data.sku}`;
-  return { sku: data.sku, name: data.name, price, image, description, url: productUrl, inStock: data.status === 1 };
+
+  // Etiqueta del producto: variedad/cepa · región · país (o año en guardados).
+  // Probamos varios códigos de atributo posibles y resolvemos los dropdowns.
+  const attrAny = async (codes) => {
+    for (const c of codes) {
+      const raw = attr(c);
+      if (raw != null && raw !== '' && raw !== '0') {
+        const v = await resolveOption(c, raw);
+        if (v && v !== '0') return v;
+      }
+    }
+    return null;
+  };
+  let cepa = await attrAny(['variedad','cepa','varietal','uva']);
+  if (!cepa) cepa = cepaFromName(data.name);
+  const region = await attrAny(['region','provincia','zona','region_vitivinicola']);
+  let pais = await attrAny(['pais_origen','pais_de_origen','pais','origen','country_of_manufacture']);
+  if (pais && COUNTRY_CODES[pais.toUpperCase()]) pais = COUNTRY_CODES[pais.toUpperCase()];
+  const bodega = await attrAny(['marca','bodega']);
+  const anio = await attrAny(['ano','anio','add_year','year','vintage','cosecha']);
+
+  return { sku: data.sku, name: data.name, price, image, description, url: productUrl,
+    inStock: data.status === 1, cepa, region, pais, bodega, anio };
 }
 
 async function getCartTotal(cartUrl) {
@@ -110,7 +165,14 @@ function buildProductBlock(product, index, isLast, showPromo, isGuardados) {
     priceBlock = `<p style="font-size:18px; font-weight:700; color:#111; margin:0 0 14px 0;">$${priceFormatted}</p>`;
   }
 
-  const label = isGuardados ? '[CEPA] · [REGIÓN] · [AÑO COSECHA]' : '[CEPA] · [REGIÓN] · [PROVINCIA]';
+  // Etiqueta con datos reales de Magento. Guardados: cepa · región · año.
+  // Resto: cepa · región · país. Se omiten los segmentos que no existen —
+  // nunca se muestra un placeholder literal.
+  const labelArr = isGuardados
+    ? [product.cepa, product.region, product.anio]
+    : [product.cepa, product.region, product.pais];
+  let label = labelArr.filter(Boolean).join(' · ');
+  if (!label) label = [product.cepa, product.bodega, product.pais].filter(Boolean).join(' · ');
 
   return `
       <!-- Producto ${index + 1} -->
@@ -351,6 +413,19 @@ export default async function handler(req, res) {
     const emailHtml = injectIntoTemplate(baseTemplate, { products, accessory, cartLink, cartTotal, tipo, mes, titulo, bajada: bajadaFinal, preheader: preheaderFinal });
     if (!emailHtml.includes('<!DOCTYPE')) {
       return res.status(500).json({ error: 'Error generando el email' });
+    }
+
+    // Dry-run: devuelve el HTML y los atributos resueltos SIN tocar Mailchimp.
+    // Sirve para previsualizar/validar sin crear borradores ni mandar emails.
+    if (req.body.dryRun) {
+      return res.status(200).json({
+        success: true, dryRun: true,
+        subject: subjectFinal, preheader: preheaderFinal, cartTotal,
+        productsFound: products.length,
+        products: products.map(p => ({ name: p.name, cepa: p.cepa, region: p.region, pais: p.pais, bodega: p.bodega, anio: p.anio, price: p.price })),
+        htmlLength: emailHtml.length,
+        html: emailHtml,
+      });
     }
 
     // 8. Mailchimp
