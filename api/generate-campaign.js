@@ -108,24 +108,23 @@ async function parseMagentoProduct(data) {
   const productUrl = urlKey ? `${MAGENTO_BASE}/${urlKey}.html` : `${MAGENTO_BASE}/catalogsearch/result/?q=${data.sku}`;
 
   // Etiqueta del producto: variedad/cepa · región · país (o año en guardados).
-  // Probamos varios códigos de atributo posibles y resolvemos los dropdowns.
-  const attrAny = async (codes) => {
-    for (const c of codes) {
-      const raw = attr(c);
-      if (raw != null && raw !== '' && raw !== '0') {
-        const v = await resolveOption(c, raw);
-        if (v && v !== '0') return v;
-      }
-    }
-    return null;
+  // En vez de adivinar el código exacto, escaneamos TODOS los atributos que
+  // Magento ya devolvió en esta misma respuesta y matcheamos por patrón de
+  // nombre. Así no hace falta una llamada extra para descubrir los códigos.
+  const allAttrs = data.custom_attributes || [];
+  const byPattern = async (re) => {
+    const cand = allAttrs.find(a => re.test(a.attribute_code) && a.value != null && a.value !== '' && a.value !== '0');
+    if (!cand) return null;
+    const v = await resolveOption(cand.attribute_code, cand.value); // resuelve dropdowns (ID→label), con cache
+    return v && v !== '0' ? v : null;
   };
-  let cepa = await attrAny(['variedad','cepa','varietal','uva']);
+  let cepa = await byPattern(/vari|cepa|uva|grape/i);
   if (!cepa) cepa = cepaFromName(data.name);
-  const region = await attrAny(['region','provincia','zona','region_vitivinicola']);
-  let pais = await attrAny(['pais_origen','pais_de_origen','pais','origen','country_of_manufacture']);
+  const region = await byPattern(/region|provinc|zona|appellation|terru?o|valle/i);
+  let pais = await byPattern(/pais|origen|country|nacionalidad/i);
   if (pais && COUNTRY_CODES[pais.toUpperCase()]) pais = COUNTRY_CODES[pais.toUpperCase()];
-  const bodega = await attrAny(['marca','bodega']);
-  const anio = await attrAny(['ano','anio','add_year','year','vintage','cosecha']);
+  const bodega = await byPattern(/marca|bodega|brand|fabric|winery/i);
+  const anio = await byPattern(/(^|_)an?io?($|_)|year|cosech|vintage|añ/i);
 
   // Debug: códigos+valores crudos de los atributos (para descubrir los códigos reales)
   const _attrs = (data.custom_attributes || []).map(a => ({ code: a.attribute_code, value: a.value }));
