@@ -218,3 +218,81 @@ export const BAJADAS = {
     "Una buena botella, a su elección.",
   ],
 };
+
+// Líneas de asunto por tipo — el subject INFORMA, no vende. Sin superlativos, sin
+// exclamaciones, sin ¡/¿. La promo NO va en el subject principal (va en el preheader).
+// Longitud objetivo: 28–42 caracteres.
+export const SUBJECTS = {
+  vinos: [
+    "Seis tintos para esta semana",
+    "Malbecs de Altamira y Gualtallary",
+    "La selección de vinos de la semana",
+    "Seis etiquetas elegidas a mano",
+    "Lo que estamos recomendando hoy",
+  ],
+  whisky: [
+    "Single malts de Escocia y Japón",
+    "Whisky para tomar sin apuro",
+    "Destilados con procedencia",
+    "La cava de whisky de Ligier",
+  ],
+  espirituosas: [
+    "Para armar tu barra en serio",
+    "Lo que le falta a tu barra",
+    "Destilados de autor para tu mesa",
+    "Gin, ron y destilados elegidos",
+  ],
+  "vinos-guardados": [
+    "Cosechas que ya no se consiguen",
+    "Vinos guardados por años",
+    "Botellas que el tiempo hizo únicas",
+    "La cava guardada de Ligier",
+  ],
+  "wine-club": [
+    "El club que curó la cava",
+    "Vinos elegidos para vos, cada mes",
+    "Acceso a lo que aún no salió",
+  ],
+  experiencias: [
+    "Una velada curada por Ligier",
+    "Maridajes, fecha y lugar",
+    "Una noche alrededor del vino",
+  ],
+  "gift-cards": [
+    "El regalo para quien sabe elegir",
+    "Una buena botella, a su elección",
+    "Un regalo con criterio",
+  ],
+};
+
+// Preheader (texto de preview en la bandeja) — COMPLEMENTA el subject, no lo repite.
+// Acá sí puede ir la promo. Longitud objetivo: 40–90 caracteres.
+export const PREHEADERS = {
+  vinos: [
+    "Elegimos uno por uno. Llevá 6, pagá 5.",
+    "Nuestra selección de la semana. Podés mezclar etiquetas.",
+    "Seis que conocemos de memoria. Llevá 6, pagá 5.",
+  ],
+  whisky: [
+    "Destilados con procedencia. Elegidos uno por uno.",
+    "Años de añejamiento en cada botella.",
+  ],
+  espirituosas: [
+    "Botellas con carácter para mezclar o tomar solas.",
+    "Con qué empezar a armar tu barra.",
+  ],
+  "vinos-guardados": [
+    "Botellas que el tiempo hizo irrepetibles.",
+    "Lo que quedó de esas añadas. Hasta 6 cuotas sin interés.",
+  ],
+  "wine-club": [
+    "Cada mes, vinos que no encontrás. Cuatro membresías.",
+    "Acceso a lo que aún no salió a la venta.",
+  ],
+  experiencias: [
+    "Maridajes, fecha y lugar. Cupos limitados.",
+  ],
+  "gift-cards": [
+    "La elección queda en sus manos.",
+  ],
+};

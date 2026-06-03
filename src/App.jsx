@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { TITULOS, BAJADAS } from "./copy-library";
+import { TITULOS, BAJADAS, SUBJECTS, PREHEADERS } from "./copy-library";
 
 const TIPOS = [
   { id: "vinos", label: "Vinos", icon: "🍷" },
@@ -34,6 +34,7 @@ export default function App() {
     tipo: "", rango: "", seleccion: "carrito", carrito: "", urls: "",
     accesorio: "auto", accesorioUrl: "",
     titulo: "", tituloCustom: false, bajada: "",
+    subject: "", preheader: "",
     tienePromo: true,
     dia: "Miércoles", hora: "10:30",
     modo: "programar", // "programar" | "borrador"
@@ -53,6 +54,8 @@ export default function App() {
     ? titulosDisponibles.filter(t => t.toLowerCase().includes(tituloSearch.toLowerCase()))
     : titulosDisponibles;
   const bajadasDisponibles = form.tipo ? (BAJADAS[form.tipo] || []) : [];
+  const subjectsDisponibles = form.tipo ? (SUBJECTS[form.tipo] || []) : [];
+  const preheadersDisponibles = form.tipo ? (PREHEADERS[form.tipo] || []) : [];
 
   const canNext = () => {
     if (step === 0) return form.tipo !== "";
@@ -107,7 +110,7 @@ export default function App() {
 
   const reset = () => {
     setResult(null); setStep(0); setError(null); setTituloSearch(""); setView("home");
-    setForm({ tipo: "", rango: "", seleccion: "carrito", carrito: "", urls: "", accesorio: "auto", accesorioUrl: "", titulo: "", tituloCustom: false, bajada: "", tienePromo: true, dia: "Miércoles", hora: "10:30", modo: "programar", emailPrueba: "dayanmartin@gmail.com", notas: "" });
+    setForm({ tipo: "", rango: "", seleccion: "carrito", carrito: "", urls: "", accesorio: "auto", accesorioUrl: "", titulo: "", tituloCustom: false, bajada: "", subject: "", preheader: "", tienePromo: true, dia: "Miércoles", hora: "10:30", modo: "programar", emailPrueba: "dayanmartin@gmail.com", notas: "" });
   };
 
 
@@ -146,8 +149,13 @@ export default function App() {
               <div style={s.summaryRow}><span style={s.summaryLabel}>Campañas</span><span style={s.summaryValue}>{analysis.overall.campañas}</span></div>
               <div style={s.summaryRow}><span style={s.summaryLabel}>Apertura prom.</span><span style={s.summaryValue}>{analysis.overall.apertura_promedio}%</span></div>
               <div style={s.summaryRow}><span style={s.summaryLabel}>Click prom.</span><span style={s.summaryValue}>{analysis.overall.click_promedio}%</span></div>
+              {analysis.overall.ctor != null && <div style={s.summaryRow}><span style={s.summaryLabel}>CTOR</span><span style={s.summaryValue}>{analysis.overall.ctor}%</span></div>}
               <div style={s.summaryRow}><span style={s.summaryLabel}>Ventas</span><span style={s.summaryValue}>${analysis.overall.revenue_total.toLocaleString('es-AR')}</span></div>
+              {analysis.overall.revenue_por_email != null && <div style={s.summaryRow}><span style={s.summaryLabel}>Revenue / email</span><span style={s.summaryValue}>${analysis.overall.revenue_por_email.toLocaleString('es-AR')}</span></div>}
               <div style={s.summaryRow}><span style={s.summaryLabel}>Órdenes</span><span style={s.summaryValue}>{analysis.overall.ordenes_total}</span></div>
+              {analysis.overall.bounce_rate != null && <div style={s.summaryRow}><span style={s.summaryLabel}>Rebote</span><span style={s.summaryValue}>{analysis.overall.bounce_rate}%</span></div>}
+              {analysis.overall.unsub_rate != null && <div style={s.summaryRow}><span style={s.summaryLabel}>Desuscripción</span><span style={s.summaryValue}>{analysis.overall.unsub_rate}%</span></div>}
+              {analysis.overall.abuse_rate != null && <div style={s.summaryRow}><span style={s.summaryLabel}>Quejas spam</span><span style={s.summaryValue}>{analysis.overall.abuse_rate}%</span></div>}
             </div>
           </div>
           {/* Insights */}
@@ -164,7 +172,7 @@ export default function App() {
               {analysis.byTipo.map((t, i) => (
                 <div key={i} style={s.summaryRow}>
                   <span style={{ ...s.summaryLabel, textTransform: 'capitalize' }}>{t.name}</span>
-                  <span style={{ fontSize: 11, color: '#888' }}>{t.open_rate}% ap · {t.click_rate}% clk · ${t.revenue.toLocaleString('es-AR')}</span>
+                  <span style={{ fontSize: 11, color: '#888' }}>{t.open_rate}% ap · {t.ctor != null ? `${t.ctor}% ctor` : `${t.click_rate}% clk`} · ${t.revenue.toLocaleString('es-AR')}</span>
                 </div>
               ))}
             </div>
@@ -325,6 +333,32 @@ export default function App() {
               onChange={e => update('bajada', e.target.value)}
             />
           </div>
+          <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 16, marginTop: 16 }}>
+            <label style={s.label}>Asunto del email (lo que se ve en la bandeja)</label>
+            <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+              {subjectsDisponibles.map((sj, i) => (
+                <button key={i} style={{ ...s.tituloBtn, background: form.subject === sj ? '#111' : '#fff', color: form.subject === sj ? '#fff' : '#111', border: `1.5px solid ${form.subject === sj ? '#111' : '#e8e8e8'}`, fontSize: 13 }}
+                  onClick={() => update('subject', sj)}>{sj}</button>
+              ))}
+            </div>
+            <textarea style={s.textarea} placeholder={"O escribí tu propio asunto (28–42 caracteres · sin promo)"} rows={2}
+              value={form.subject && !subjectsDisponibles.includes(form.subject) ? form.subject : ''}
+              onChange={e => update('subject', e.target.value)}
+            />
+          </div>
+          <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 16, marginTop: 16 }}>
+            <label style={s.label}>Preheader (texto de preview — complementa el asunto)</label>
+            <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+              {preheadersDisponibles.map((ph, i) => (
+                <button key={i} style={{ ...s.tituloBtn, background: form.preheader === ph ? '#111' : '#fff', color: form.preheader === ph ? '#fff' : '#111', border: `1.5px solid ${form.preheader === ph ? '#111' : '#e8e8e8'}`, fontSize: 13 }}
+                  onClick={() => update('preheader', ph)}>{ph}</button>
+              ))}
+            </div>
+            <textarea style={s.textarea} placeholder={"O escribí tu propio preheader (40–90 caracteres · acá sí puede ir la promo)"} rows={2}
+              value={form.preheader && !preheadersDisponibles.includes(form.preheader) ? form.preheader : ''}
+              onChange={e => update('preheader', e.target.value)}
+            />
+          </div>
         </>}
 
         {/* STEP 4 — Promos */}
@@ -390,6 +424,8 @@ export default function App() {
               { label: "Selección", value: form.seleccion === 'carrito' ? 'Link de carrito' : 'URLs de productos' },
               { label: "Accesorio", value: form.accesorio === 'auto' ? 'Claude elige' : form.accesorio === 'ninguno' ? 'Sin accesorio' : 'Manual' },
               { label: "Título", value: form.titulo.replace(/\n/g, ' · ') },
+              { label: "Asunto", value: form.subject || '(default por tipo)' },
+              { label: "Preheader", value: form.preheader || '(default por tipo)' },
               { label: "Promoción", value: form.tienePromo ? 'Sí' : 'No' },
               { label: "Envío", value: form.modo === 'borrador' ? 'Borrador' : `${form.dia} · ${form.hora}` },
               { label: "Email prueba", value: form.emailPrueba },

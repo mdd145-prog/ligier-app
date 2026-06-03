@@ -223,6 +223,16 @@ function injectIntoTemplate(template, opts) {
     result = result.replace(/(<p[^>]*class="pack-total"[^>]*>)[\s\S]*?(<\/p>)/, `$1${cartTotal}$2`);
   }
 
+  // 7. Preheader — replace the visible text inside the hidden preheader div,
+  //    preservando los caracteres de relleno (entities) que evitan que Gmail
+  //    arrastre texto del cuerpo al preview.
+  if (opts.preheader) {
+    result = result.replace(
+      /(<div class="preheader"[^>]*>)[\s\S]*?(\s*(?:&#847;|&zwnj;|&nbsp;)[\s\S]*?<\/div>)/,
+      `$1\n  ${opts.preheader}$2`
+    );
+  }
+
   return result;
 }
 
@@ -231,7 +241,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { tipo, seleccion, carrito, urls, dia, hora, titulo, bajada, accesorio, accesorioUrl, modo, emailPrueba } = req.body;
+  const { tipo, seleccion, carrito, urls, dia, hora, titulo, bajada, subject, preheader, accesorio, accesorioUrl, modo, emailPrueba } = req.body;
   const mes = new Date().toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
 
   // Default bajada per type (used if user doesn't provide one)
@@ -242,6 +252,29 @@ export default async function handler(req, res) {
     'vinos-guardados': 'Botellas que el tiempo hizo únicas.',
   };
   const bajadaFinal = (bajada || BAJADAS[tipo] || '').replace(/\n/g, '<br>');
+
+  // Default subject + preheader per type (fallback si el wizard no los manda).
+  // El subject INFORMA (sin promo); la promo va en el preheader.
+  const SUBJECTS = {
+    'vinos': 'La selección de vinos de la semana',
+    'whisky': 'Destilados con procedencia',
+    'espirituosas': 'Para armar tu barra en serio',
+    'vinos-guardados': 'Cosechas que ya no se consiguen',
+    'wine-club': 'Vinos elegidos para vos, cada mes',
+    'experiencias': 'Una velada curada por Ligier',
+    'gift-cards': 'El regalo para quien sabe elegir',
+  };
+  const PREHEADERS = {
+    'vinos': 'Elegimos uno por uno. Llevá 6, pagá 5.',
+    'whisky': 'Destilados con procedencia. Elegidos uno por uno.',
+    'espirituosas': 'Botellas con carácter para mezclar o tomar solas.',
+    'vinos-guardados': 'Botellas que el tiempo hizo irrepetibles.',
+    'wine-club': 'Cada mes, vinos que no encontrás. Cuatro membresías.',
+    'experiencias': 'Maridajes, fecha y lugar. Cupos limitados.',
+    'gift-cards': 'La elección queda en sus manos.',
+  };
+  const subjectFinal = (subject && subject.trim()) || SUBJECTS[tipo] || `Nueva selección ${mes} — Ligier`;
+  const preheaderFinal = ((preheader && preheader.trim()) || PREHEADERS[tipo] || '').replace(/\n/g, ' ');
 
   try {
     // 1. Load template
@@ -315,7 +348,7 @@ export default async function handler(req, res) {
     }
 
     // 7. Inject everything
-    const emailHtml = injectIntoTemplate(baseTemplate, { products, accessory, cartLink, cartTotal, tipo, mes, titulo, bajada: bajadaFinal });
+    const emailHtml = injectIntoTemplate(baseTemplate, { products, accessory, cartLink, cartTotal, tipo, mes, titulo, bajada: bajadaFinal, preheader: preheaderFinal });
     if (!emailHtml.includes('<!DOCTYPE')) {
       return res.status(500).json({ error: 'Error generando el email' });
     }
@@ -334,7 +367,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         type: 'regular',
         recipients: { list_id: audienceId },
-        settings: { subject_line: `Nueva selección ${mes} — Ligier`, from_name: 'Ligier', reply_to: 'ventas@ligier.com.ar', title: campaignTitle }
+        settings: { subject_line: subjectFinal, preview_text: preheaderFinal, from_name: 'Ligier', reply_to: 'ventas@ligier.com.ar', title: campaignTitle }
       })
     });
     const campaign = await createRes.json();
