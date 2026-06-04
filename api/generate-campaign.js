@@ -1,6 +1,6 @@
 export const config = { maxDuration: 60 };
 
-const GITHUB_RAW = 'https://raw.githubusercontent.com/mdd145-prog/mailchimp/main/templates/';
+const GITHUB_RAW = 'https://raw.githubusercontent.com/mdd145-prog/Mailchimp/main/templates/';
 
 const TEMPLATES = {
   'vinos':           'base-email-vinos.html',
@@ -209,8 +209,30 @@ function buildAccessoryBlock(acc) {
             <a href="${acc.url}" target="_blank" style="display:inline-block; background:transparent; border:1.5px solid #111; color:#111; font-size:10px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; padding:9px 18px; text-decoration:none;">VER PRODUCTO</a>`;
 }
 
+// Reemplaza todo lo que hay entre un par de marcadores INJECT, conservando los
+// marcadores. Devuelve { result, found } para poder decidir el fallback legacy.
+function replaceBetween(html, startMarker, endMarker, replacement) {
+  const s = html.indexOf(startMarker);
+  if (s === -1) return { result: html, found: false };
+  const afterStart = s + startMarker.length;
+  const e = html.indexOf(endMarker, afterStart);
+  if (e === -1) return { result: html, found: false };
+  const result = html.substring(0, afterStart) + replacement + html.substring(e);
+  return { result, found: true };
+}
+
+// Elimina todo el rango entre dos marcadores, incluidos los propios marcadores.
+function removeBetweenInclusive(html, startMarker, endMarker) {
+  const s = html.indexOf(startMarker);
+  if (s === -1) return { result: html, found: false };
+  const e = html.indexOf(endMarker, s + startMarker.length);
+  if (e === -1) return { result: html, found: false };
+  const result = html.substring(0, s) + html.substring(e + endMarker.length);
+  return { result, found: true };
+}
+
 function injectIntoTemplate(template, opts) {
-  const { products, accessory, cartLink, cartTotal, tipo, mes, titulo } = opts;
+  const { products, accessory, cartLink, cartTotal, tipo, mes, titulo, qualifies6x5 } = opts;
   let result = template;
   const showPromo = tipo === 'vinos';
   const isGuardados = tipo === 'vinos-guardados';
@@ -223,8 +245,14 @@ function injectIntoTemplate(template, opts) {
   // "$1...$2". Si el valor inyectado contiene un "$" (ej. precios "$108.858"),
   // String.replace interpretaría "$1" como referencia de grupo y comería el dígito.
   // Con función, el string devuelto se usa literal y el bug desaparece.
-  result = result.replace(/(<p[^>]*color:#666[^>]*>)[^<]+(<\/p>)/, (m, p1, p2) => p1 + eyebrowText + p2);
-  result = result.replace(/(<p[^>]*rgba\(255,255,255,0\.5\)[^>]*>)[^<]+(<\/p>)/, (m, p1, p2) => p1 + eyebrowText + p2);
+  // v4: anclaje por class="hero-eyebrow". Fallback legacy: primer color:#666 /
+  // rgba(255,255,255,0.5) del documento.
+  if (/class="hero-eyebrow"/.test(result)) {
+    result = result.replace(/(<p[^>]*class="hero-eyebrow"[^>]*>)[\s\S]*?(<\/p>)/, (m, p1, p2) => p1 + eyebrowText + p2);
+  } else {
+    result = result.replace(/(<p[^>]*color:#666[^>]*>)[^<]+(<\/p>)/, (m, p1, p2) => p1 + eyebrowText + p2);
+    result = result.replace(/(<p[^>]*rgba\(255,255,255,0\.5\)[^>]*>)[^<]+(<\/p>)/, (m, p1, p2) => p1 + eyebrowText + p2);
+  }
 
   // 2. Hero H1
   if (titulo) {
@@ -238,21 +266,42 @@ function injectIntoTemplate(template, opts) {
   }
 
   // 3. Products
-  const prodStart = result.indexOf('<!-- Producto 1 -->');
-  let prodEnd = result.indexOf('<!-- ── 4b.');
-  if (prodEnd === -1) prodEnd = result.indexOf('<!-- ── 5.');
-  if (prodEnd === -1) prodEnd = result.indexOf('<!-- ── WINE CLUB');
-  if (prodEnd === -1) prodEnd = result.indexOf('<!-- ── CUOTAS');
-  if (prodStart !== -1 && prodEnd !== -1) {
-    const productsHtml = products.map((p, i) => buildProductBlock(p, i, i === products.length - 1, showPromo, isGuardados)).join('\n');
-    result = result.substring(0, prodStart) + productsHtml + '\n    ' + result.substring(prodEnd);
+  const productsHtml = products.map((p, i) => buildProductBlock(p, i, i === products.length - 1, showPromo, isGuardados)).join('\n');
+  // v4: bloque entre <!-- INJECT:PRODUCTS_START --> y <!-- INJECT:PRODUCTS_END -->
+  // (los marcadores quedan). Fallback legacy: <!-- Producto 1 --> + comentarios
+  // de sección como límite.
+  const prodInject = replaceBetween(result, '<!-- INJECT:PRODUCTS_START -->', '<!-- INJECT:PRODUCTS_END -->', '\n' + productsHtml + '\n    ');
+  if (prodInject.found) {
+    result = prodInject.result;
+  } else {
+    const prodStart = result.indexOf('<!-- Producto 1 -->');
+    let prodEnd = result.indexOf('<!-- ── 4b.');
+    if (prodEnd === -1) prodEnd = result.indexOf('<!-- ── 5.');
+    if (prodEnd === -1) prodEnd = result.indexOf('<!-- ── WINE CLUB');
+    if (prodEnd === -1) prodEnd = result.indexOf('<!-- ── CUOTAS');
+    if (prodStart !== -1 && prodEnd !== -1) {
+      result = result.substring(0, prodStart) + productsHtml + '\n    ' + result.substring(prodEnd);
+    }
+  }
+
+  // 3b. Banner promo 6×5 y bloque pack (solo vinos). Si la campaña NO califica
+  //     (Σqty < 6) se eliminan ambos rangos completos, marcadores incluidos,
+  //     para no mostrar nunca un "$0". Si no existen los marcadores (plantilla
+  //     legacy) no hay nada que eliminar: el pack-total queda sin inyectar.
+  if (tipo === 'vinos' && !qualifies6x5) {
+    result = removeBetweenInclusive(result, '<!-- INJECT:PROMO_START -->', '<!-- INJECT:PROMO_END -->').result;
+    result = removeBetweenInclusive(result, '<!-- INJECT:PACK_START -->', '<!-- INJECT:PACK_END -->').result;
   }
 
   // 4. Accessory
   if (accessory) {
+    // v4: límites por <!-- INJECT:ACC_START/END -->; fallback legacy: ACC_START/END.
+    const hasInjectAcc = result.indexOf('<!-- INJECT:ACC_START -->') !== -1;
+    const accStartRe = hasInjectAcc ? '<!-- INJECT:ACC_START -->' : '<!-- ACC_START -->';
     // Replace image, name, description, price and links in the accessory section
+    const reImg = new RegExp('(' + accStartRe + '[\\s\\S]*?<img src=")[^"]*(")');
     result = result.replace(
-      /(<!-- ACC_START -->[\s\S]*?<img src=")[^"]*(")/,
+      reImg,
       (m, p1, p2) => p1 + (accessory.image || '') + p2
     );
     // Replace accessory name (first product-name link inside ACC section)
@@ -262,8 +311,9 @@ function injectIntoTemplate(template, opts) {
     const accUrl = accessory.url || '#';
     // Rebuild the inner info block entre ACC_START y ACC_END (función de reemplazo:
     // accPrice contiene "$", así que con string "$1...$2" se comería un dígito).
+    const reInfo = new RegExp('(' + accStartRe + '[\\s\\S]*?<td valign="middle">)[\\s\\S]*?(<\\/td>\\s*<\\/tr>\\s*<\\/table>)');
     result = result.replace(
-      /(<!-- ACC_START -->[\s\S]*?<td valign="middle">)[\s\S]*?(<\/td>\s*<\/tr>\s*<\/table>)/,
+      reInfo,
       (m, p1, p2) => p1 + `
             <p style="font-size:9px; font-weight:700; letter-spacing:2px; color:#aaa; text-transform:uppercase; margin:0 0 5px 0;">ACCESORIO</p>
             <p style="font-size:14px; font-weight:700; color:#111; margin:0 0 6px 0;"><a href="${accUrl}" target="_blank" style="color:#111;">${accName}</a></p>
@@ -273,13 +323,16 @@ function injectIntoTemplate(template, opts) {
           ` + p2
     );
     // Fix accessory link in image too
+    const reLink = new RegExp('(' + accStartRe + '[\\s\\S]*?<a href=")[^"]*(" target="_blank">\\s*<img)');
     result = result.replace(
-      /(<!-- ACC_START -->[\s\S]*?<a href=")[^"]*(" target="_blank">\s*<img)/,
+      reLink,
       (m, p1, p2) => p1 + accUrl + p2
     );
   } else {
-    // No accessory chosen — remove the whole section
-    result = result.replace(/<!-- ACC_START -->[\s\S]*?<!-- ACC_END -->/, '');
+    // No accessory chosen — remove the whole section (v4 markers o legacy).
+    const removed = removeBetweenInclusive(result, '<!-- INJECT:ACC_START -->', '<!-- INJECT:ACC_END -->');
+    result = removed.found ? removed.result
+      : result.replace(/<!-- ACC_START -->[\s\S]*?<!-- ACC_END -->/, '');
   }
 
   // 5. Cart links
@@ -415,16 +468,29 @@ export default async function handler(req, res) {
       if (defKey) accessory = await getMagentoProductByUrlKey(defKey);
     }
 
-    // 5. Pack total (only for vinos) — calculated like Magento's 6x5 MIX promo:
-    //    subtotal minus the cheapest bottle(s). For every 6 bottles, the cheapest is free.
+    // 5. Condición 6×5 por BOTELLAS (Σqty), no por cantidad de productos.
+    //    - Selección por carrito: sumamos las qty decodificadas del link.
+    //    - Selección por URLs (sin carrito): qty implícita 1 por producto.
+    //    Solo aplica a vinos.
+    let totalBottles;
+    if (skuList.length > 0) {
+      totalBottles = skuList.reduce((s, it) => s + (parseInt(it.qty) || 0), 0);
+    } else {
+      totalBottles = products.length; // URLs → 1 botella por producto
+    }
+    const qualifies6x5 = tipo === 'vinos' && totalBottles >= 6;
+
+    // Total del pack: SIEMPRE leído del carrito real de Magento (B1.1).
+    //    Si la campaña califica pero no se puede leer el total → 502, sin fallback.
     let cartTotal = null;
-    if (tipo === 'vinos' && products.length >= 6) {
-      const prices = products.map(p => parseFloat(p.price) || 0).sort((a, b) => a - b);
-      const subtotal = prices.reduce((s, p) => s + p, 0);
-      const freeBottles = Math.floor(products.length / 6);
-      const discount = prices.slice(0, freeBottles).reduce((s, p) => s + p, 0);
-      const total = Math.round(subtotal - discount);
-      cartTotal = '$' + total.toLocaleString('es-AR');
+    if (qualifies6x5) {
+      if (!cartLink) {
+        return res.status(502).json({ error: 'No se pudo leer el total del carrito de Magento' });
+      }
+      cartTotal = await getCartTotal(cartLink);
+      if (!cartTotal) {
+        return res.status(502).json({ error: 'No se pudo leer el total del carrito de Magento' });
+      }
     }
 
     // 6. Membership images for guardados (from Magento)
@@ -437,7 +503,7 @@ export default async function handler(req, res) {
     }
 
     // 7. Inject everything
-    const emailHtml = injectIntoTemplate(baseTemplate, { products, accessory, cartLink, cartTotal, tipo, mes, titulo, bajada: bajadaFinal, preheader: preheaderFinal });
+    const emailHtml = injectIntoTemplate(baseTemplate, { products, accessory, cartLink, cartTotal, tipo, mes, titulo, bajada: bajadaFinal, preheader: preheaderFinal, qualifies6x5 });
     if (!emailHtml.includes('<!DOCTYPE')) {
       return res.status(500).json({ error: 'Error generando el email' });
     }
@@ -495,8 +561,13 @@ export default async function handler(req, res) {
       const sendDate = new Date(today);
       sendDate.setDate(today.getDate() + daysUntil);
       const [h, m] = (hora || '10:30').split(':');
-      sendDate.setHours(parseInt(h), parseInt(m), 0, 0);
-      const utcDate = new Date(sendDate.getTime() + 3 * 60 * 60 * 1000);
+      // Argentina es GMT-3 fijo (sin DST): construimos el instante UTC explícito
+      // desde la hora local argentina, en vez de sumar 3h asumiendo server UTC.
+      // Equivalente al cálculo anterior cuando el server corre en UTC.
+      const utcDate = new Date(Date.UTC(
+        sendDate.getFullYear(), sendDate.getMonth(), sendDate.getDate(),
+        parseInt(h) + 3, parseInt(m), 0, 0
+      ));
       scheduleTime = utcDate.toISOString().replace('.000Z', '+00:00');
       await fetch(`${mcBase}/campaigns/${campaign.id}/actions/schedule`, {
         method: 'POST', headers: mcHeaders, body: JSON.stringify({ schedule_time: scheduleTime })
