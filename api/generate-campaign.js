@@ -134,13 +134,56 @@ async function parseMagentoProduct(data) {
 }
 
 async function getCartTotal(cartUrl) {
+  // Magento 2 renderiza /checkout/cart/ con los totales (incluido el descuento
+  // 6×5 ya aplicado) embebidos como JSON dentro del HTML — pero solo si la
+  // request va con la sesión que setea el share URL. Como Node fetch no tiene
+  // cookie jar, seguimos los redirects a mano acumulando Set-Cookie en cada hop.
   try {
-    const res = await fetchWithTimeout(cartUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } }, 8000);
-    const html = await res.text();
-    const grandTotal = html.match(/class="grand totals"[\s\S]*?class="price"[^>]*>([^<]+)<\/span>/);
-    if (grandTotal) return grandTotal[1].trim();
-    const allPrices = html.match(/\$[\d]{2,3}(?:\.[\d]{3})+/g);
-    return allPrices ? allPrices[allPrices.length - 1] : null;
+    let url = cartUrl;
+    const cookies = {};
+    for (let hop = 0; hop < 5; hop++) {
+      const cookieHeader = Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; ');
+      const res = await fetchWithTimeout(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0',
+          ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+        },
+        redirect: 'manual',
+      }, 8000);
+
+      const setCookies = typeof res.headers.getSetCookie === 'function'
+        ? res.headers.getSetCookie()
+        : (res.headers.get('set-cookie') ? [res.headers.get('set-cookie')] : []);
+      for (const sc of setCookies) {
+        const m = sc.match(/^([^=]+)=([^;]*)/);
+        if (m) cookies[m[1]] = m[2];
+      }
+
+      const loc = res.headers.get('location');
+      if (res.status >= 300 && res.status < 400 && loc) {
+        url = new URL(loc, url).toString();
+        continue;
+      }
+
+      const html = await res.text();
+      // 1) grand_total del JSON embebido (incluye descuento 6×5 ya aplicado)
+      const gt = html.match(/"grand_total"\s*:\s*"?([\d.]+)"?/);
+      if (gt) {
+        const val = Math.round(parseFloat(gt[1]));
+        return '$' + val.toLocaleString('es-AR');
+      }
+      // 2) Fallback: HTML legacy con class="grand totals"
+      const legacy = html.match(/class="grand totals"[\s\S]*?class="price"[^>]*>([^<]+)<\/span>/);
+      if (legacy) return legacy[1].trim();
+      // 3) Último recurso: subtotalAmount (sin descuento) — preferible a fallar
+      const sub = html.match(/"subtotalAmount"\s*:\s*"?([\d.]+)"?/);
+      if (sub) {
+        const val = Math.round(parseFloat(sub[1]));
+        return '$' + val.toLocaleString('es-AR');
+      }
+      return null;
+    }
+    return null;
   } catch(e) { return null; }
 }
 
