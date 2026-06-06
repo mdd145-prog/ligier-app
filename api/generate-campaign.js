@@ -401,12 +401,64 @@ function injectIntoTemplate(template, opts) {
   return result;
 }
 
+// Claude elige el accesorio más afín a los productos (candidatos reales de Magento).
+// Si falta ANTHROPIC_API_KEY o algo falla, devuelve null y el caller usa el curado default.
+async function claudePickAccessory(tipo, products) {
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  try {
+    const { default: Anthropic } = await import('@anthropic-ai/sdk');
+    const anthropic = new Anthropic();
+    // Candidatos: accesorios de las marcas de cristalería/accesorios del catálogo
+    const terms = ['riedel', 'nachtmann', 'decanter', 'sacacorchos', 'copa'];
+    const seen = new Set();
+    const candidates = [];
+    for (const t of terms) {
+      const url = `${MAGENTO_BASE}/rest/V1/products?searchCriteria[filterGroups][0][filters][0][field]=name&searchCriteria[filterGroups][0][filters][0][value]=%25${t}%25&searchCriteria[filterGroups][0][filters][0][conditionType]=like&searchCriteria[filterGroups][1][filters][0][field]=status&searchCriteria[filterGroups][1][filters][0][value]=1&searchCriteria[pageSize]=10&fields=items[sku,name,price,custom_attributes]`;
+      const r = await fetchWithTimeout(url, { headers: { Authorization: `Bearer ${MAGENTO_TOKEN}` } }, 8000);
+      if (!r.ok) continue;
+      const d = await r.json();
+      for (const p of d.items || []) {
+        if (seen.has(p.sku)) continue;
+        seen.add(p.sku);
+        const urlKey = p.custom_attributes?.find(a => a.attribute_code === 'url_key')?.value;
+        if (urlKey && p.price > 0) candidates.push({ sku: p.sku, name: p.name, price: p.price, urlKey });
+      }
+      if (candidates.length >= 25) break;
+    }
+    if (candidates.length === 0) return null;
+
+    const schema = {
+      type: 'object',
+      properties: { sku: { type: 'string' }, motivo: { type: 'string' } },
+      required: ['sku', 'motivo'],
+      additionalProperties: false,
+    };
+    const resp = await anthropic.messages.create({
+      model: 'claude-opus-4-8',
+      max_tokens: 600,
+      output_config: { format: { type: 'json_schema', schema } },
+      messages: [{
+        role: 'user',
+        content: `Elegí UN accesorio (por sku) que complemente esta selección de un email "${tipo}" de Vinoteca Ligier.
+PRODUCTOS DEL EMAIL:\n${products.map(p => `- ${p.name} (${p.cepa || ''})`).join('\n')}
+CANDIDATOS:\n${candidates.map(c => `- sku:${c.sku} | ${c.name} | $${c.price}`).join('\n')}`,
+      }],
+    });
+    const out = JSON.parse(resp.content.find(b => b.type === 'text').text);
+    const elegido = candidates.find(c => c.sku === out.sku);
+    return elegido ? await getMagentoProductByUrlKey(elegido.urlKey) : null;
+  } catch (e) {
+    console.error('claudePickAccessory fallback:', e.message);
+    return null;
+  }
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { tipo, seleccion, carrito, urls, dia, hora, titulo, bajada, subject, preheader, accesorio, accesorioUrl, modo, emailPrueba } = req.body;
+  const { tipo, seleccion, carrito, urls, dia, fecha, hora, titulo, bajada, subject, preheader, accesorio, accesorioUrl, modo, emailPrueba, canal, lista_id } = req.body;
   const mes = new Date().toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
 
   // Default bajada per type (used if user doesn't provide one)
@@ -507,8 +559,12 @@ export default async function handler(req, res) {
       const accKey = accesorioUrl.split('/').pop().replace('.html', '');
       accessory = await getMagentoProductByUrlKey(accKey);
     } else if (accesorio !== 'ninguno') {
-      const defKey = DEFAULT_ACCESSORIES[tipo];
-      if (defKey) accessory = await getMagentoProductByUrlKey(defKey);
+      // 'auto' = Claude elige el accesorio más afín a los productos seleccionados
+      accessory = await claudePickAccessory(tipo, products);
+      if (!accessory) {
+        const defKey = DEFAULT_ACCESSORIES[tipo];
+        if (defKey) accessory = await getMagentoProductByUrlKey(defKey);
+      }
     }
 
     // 5. Condición 6×5 por BOTELLAS (Σqty), no por cantidad de productos.
@@ -565,7 +621,50 @@ export default async function handler(req, res) {
       });
     }
 
-    // 8. Mailchimp
+    // 8a. Canal LGR → la campaña sale por nuestra base con AWS SES
+    if (canal === 'lgr') {
+      const lgrUrl = process.env.LGR_API_URL;
+      const lgrToken = process.env.LGR_API_TOKEN;
+      if (!lgrUrl || !lgrToken) {
+        return res.status(500).json({ error: 'Canal LGR no configurado (faltan LGR_API_URL / LGR_API_TOKEN en Vercel)' });
+      }
+      // Programación: fecha exacta (v2) en hora argentina GMT-3
+      let programadaAt = null;
+      if (modo !== 'borrador' && fecha) {
+        const [h2, m2] = (hora || '10:30').split(':');
+        programadaAt = `${fecha}T${String(h2).padStart(2,'0')}:${String(m2).padStart(2,'0')}:00-03:00`;
+      }
+      const lgrRes = await fetchWithTimeout(`${lgrUrl}/api/publico/mkt/campanas`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-LGR-Token': lgrToken },
+        body: JSON.stringify({
+          nombre: `Ligier · ${tipo} · ${fecha || dia || ''} ${mes}`.trim(),
+          asunto: subjectFinal,
+          preheader: preheaderFinal,
+          cuerpo_html: emailHtml,
+          lista_id: lista_id || null,
+          programada_at: programadaAt,
+          modo: programadaAt && lista_id ? 'programada' : 'borrador',
+        }),
+      }, 15000);
+      const lgrData = await lgrRes.json();
+      if (!lgrRes.ok || !lgrData.ok) {
+        return res.status(502).json({ error: 'LGR rechazó la campaña', detail: JSON.stringify(lgrData) });
+      }
+      return res.status(200).json({
+        success: true,
+        canal: 'lgr',
+        campaignId: lgrData.campana_id,
+        campaignName: `Ligier · ${tipo} · ${fecha || dia || ''}`.trim(),
+        estado: lgrData.estado,
+        scheduleTime: programadaAt,
+        isDraft: lgrData.estado === 'borrador',
+        productsFound: products.length,
+        lgrUrl: lgrData.url,
+      });
+    }
+
+    // 8b. Mailchimp (canal por defecto)
     const mcKey = process.env.MAILCHIMP_API_KEY;
     const dc = mcKey.split('-').pop();
     const audienceId = process.env.MAILCHIMP_AUDIENCE_ID;
@@ -597,12 +696,20 @@ export default async function handler(req, res) {
 
     let scheduleTime = null;
     if (modo !== 'borrador') {
-      const diasMap = { Lunes:1, Martes:2, Miércoles:3, Jueves:4, Viernes:5, Sábado:6, Domingo:0 };
-      const today = new Date();
-      const targetDay = diasMap[dia] ?? 3;
-      let daysUntil = (targetDay - today.getDay() + 7) % 7 || 7;
-      const sendDate = new Date(today);
-      sendDate.setDate(today.getDate() + daysUntil);
+      let sendDate;
+      if (fecha) {
+        // v2: fecha exacta del calendario (YYYY-MM-DD)
+        const [y, mo, d] = fecha.split('-').map(Number);
+        sendDate = new Date(y, mo - 1, d);
+      } else {
+        // legacy: próximo día de semana
+        const diasMap = { Lunes:1, Martes:2, Miércoles:3, Jueves:4, Viernes:5, Sábado:6, Domingo:0 };
+        const today = new Date();
+        const targetDay = diasMap[dia] ?? 3;
+        let daysUntil = (targetDay - today.getDay() + 7) % 7 || 7;
+        sendDate = new Date(today);
+        sendDate.setDate(today.getDate() + daysUntil);
+      }
       const [h, m] = (hora || '10:30').split(':');
       // Argentina es GMT-3 fijo (sin DST): construimos el instante UTC explícito
       // desde la hora local argentina, en vez de sumar 3h asumiendo server UTC.

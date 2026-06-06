@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { TITULOS, BAJADAS, SUBJECTS, PREHEADERS } from "./copy-library";
 
 const TIPOS = [
@@ -12,17 +12,14 @@ const TIPOS = [
 ];
 
 const RANGOS = ["20-30k", "30-40k", "40-60k", "60-90k", "90-120k", "+120k"];
-const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 
-
-const STEPS = ["Tipo", "Productos", "Accesorio", "Título", "Promos", "Fecha", "Opciones", "Confirmar"];
+const STEPS = ["Tipo", "Productos", "Accesorio", "Título", "Promos", "Fecha", "Canal", "Opciones", "Vista previa"];
 
 const PROGRESS_STEPS = [
   "Cargando template...",
   "Consultando productos...",
   "Armando el email...",
-  "Creando campaña...",
-  "Programando envío...",
+  "Generando vista previa...",
 ];
 
 export default function App() {
@@ -30,46 +27,160 @@ export default function App() {
   const [analysis, setAnalysis] = useState(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [step, setStep] = useState(0);
-  const [form, setForm] = useState({
-    tipo: "", rango: "", seleccion: "carrito", carrito: "", urls: "",
-    accesorio: "auto", accesorioUrl: "",
-    titulo: "", tituloCustom: false, bajada: "",
-    subject: "", preheader: "",
-    tienePromo: true,
-    dia: "Miércoles", hora: "10:30",
-    modo: "programar", // "programar" | "borrador"
-    emailPrueba: "dayanmartin@gmail.com",
-    notas: "",
-  });
+  const [form, setForm] = useState(initialForm());
   const [loading, setLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [tituloSearch, setTituloSearch] = useState("");
+  // v2
+  const [extra, setExtra] = useState({ titulo: [], bajada: [], subject: [], preheader: [] }); // sugerencias IA
+  const [sugiriendo, setSugiriendo] = useState("");
+  const [claudeProds, setClaudeProds] = useState(null); // {productos, criterio}
+  const [claudeSel, setClaudeSel] = useState(new Set());
+  const [buscandoProds, setBuscandoProds] = useState(false);
+  const [promos, setPromos] = useState(null);
+  const [listasLgr, setListasLgr] = useState(null);
+  const [preview, setPreview] = useState(null); // {html, subject, preheader, cartTotal, productsFound}
+  const [aprobando, setAprobando] = useState(false);
+
+  function initialForm() {
+    return {
+      tipo: "", rango: "", seleccion: "carrito", carrito: "", urls: "",
+      accesorio: "auto", accesorioUrl: "",
+      titulo: "", tituloCustom: false, bajada: "",
+      subject: "", preheader: "",
+      tienePromo: true,
+      fecha: "", hora: "10:30",
+      canal: "mailchimp", lista_id: "",
+      modo: "programar",
+      emailPrueba: "dayanmartin@gmail.com",
+      notas: "",
+    };
+  }
 
   const update = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const selectedTipo = TIPOS.find(t => t.id === form.tipo);
-  const titulosDisponibles = form.tipo ? (TITULOS[form.tipo] || []) : [];
+  const titulosDisponibles = form.tipo ? [...(extra.titulo), ...(TITULOS[form.tipo] || [])] : [];
   const titulosFiltrados = tituloSearch
     ? titulosDisponibles.filter(t => t.toLowerCase().includes(tituloSearch.toLowerCase()))
     : titulosDisponibles;
-  const bajadasDisponibles = form.tipo ? (BAJADAS[form.tipo] || []) : [];
-  const subjectsDisponibles = form.tipo ? (SUBJECTS[form.tipo] || []) : [];
-  const preheadersDisponibles = form.tipo ? (PREHEADERS[form.tipo] || []) : [];
+  const bajadasDisponibles = form.tipo ? [...(extra.bajada), ...(BAJADAS[form.tipo] || [])] : [];
+  const subjectsDisponibles = form.tipo ? [...(extra.subject), ...(SUBJECTS[form.tipo] || [])] : [];
+  const preheadersDisponibles = form.tipo ? [...(extra.preheader), ...(PREHEADERS[form.tipo] || [])] : [];
 
   const canNext = () => {
     if (step === 0) return form.tipo !== "";
     if (step === 1) {
       if (form.seleccion === "carrito") return form.carrito !== "";
       if (form.seleccion === "urls") return form.urls.trim() !== "";
+      if (form.seleccion === "claude") return claudeSel.size > 0;
       return false;
     }
     if (step === 2) return form.accesorio === "ninguno" || form.accesorio === "auto" || (form.accesorio === "manual" && form.accesorioUrl !== "");
     if (step === 3) return form.titulo !== "";
     if (step === 4) return true;
-    if (step === 5) return form.dia !== "" && form.hora !== "";
-    if (step === 6) return form.emailPrueba !== "";
+    if (step === 5) return form.fecha !== "" && form.hora !== "";
+    if (step === 6) return form.canal === "mailchimp" || (form.canal === "lgr" && form.lista_id !== "");
+    if (step === 7) return form.canal === "lgr" || form.emailPrueba !== "";
     return true;
+  };
+
+  // ── IA: sugerir copys nuevos ──
+  const sugerir = async (campo) => {
+    setSugiriendo(campo);
+    try {
+      const res = await fetch("/api/assist", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accion: "copys", campo, tipo: form.tipo, contexto: form.notas || undefined }),
+      });
+      const data = await res.json();
+      if (data.sugerencias) setExtra(e => ({ ...e, [campo]: [...data.sugerencias, ...e[campo]] }));
+    } catch (e) { /* silencioso */ }
+    setSugiriendo("");
+  };
+
+  // ── IA: elegir productos ──
+  const buscarConClaude = async () => {
+    setBuscandoProds(true); setError(null);
+    try {
+      const res = await fetch("/api/assist", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accion: "productos", tipo: form.tipo, rango: form.rango, notas: form.notas }),
+      });
+      const data = await res.json();
+      if (data.error) { setError(data.error); }
+      else {
+        setClaudeProds(data);
+        setClaudeSel(new Set((data.productos || []).map(p => p.sku)));
+      }
+    } catch (e) { setError(e.message); }
+    setBuscandoProds(false);
+  };
+
+  // ── Canal: cargar listas LGR ──
+  useEffect(() => {
+    if (step === 6 && form.canal === "lgr" && !listasLgr) {
+      fetch("/api/assist", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accion: "lgr_listas" }),
+      }).then(r => r.json()).then(setListasLgr).catch(() => setListasLgr({ error: "No se pudo conectar con LGR" }));
+    }
+  }, [step, form.canal]);
+
+  // ── Promos vigentes ──
+  useEffect(() => {
+    if (step === 4 && !promos) {
+      fetch("/api/assist", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accion: "promos" }),
+      }).then(r => r.json()).then(setPromos).catch(() => {});
+    }
+  }, [step]);
+
+  const buildPayload = (dryRun) => {
+    const payload = { ...form, dryRun };
+    if (form.seleccion === "claude" && claudeProds) {
+      payload.seleccion = "urls";
+      payload.urls = claudeProds.productos.filter(p => claudeSel.has(p.sku)).map(p => p.url).join("\n");
+    }
+    return payload;
+  };
+
+  // ── Paso final: generar vista previa (dryRun) ──
+  const generarPreview = async () => {
+    setLoading(true); setError(null); setLoadingStep(0); setPreview(null);
+    const interval = setInterval(() => setLoadingStep(s2 => Math.min(s2 + 1, PROGRESS_STEPS.length - 1)), 6000);
+    try {
+      const res = await fetch("/api/generate-campaign", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildPayload(true)),
+      });
+      const data = await res.json();
+      clearInterval(interval);
+      if (!res.ok || !data.success) { setError(data.error || "Error generando la vista previa"); setLoading(false); return; }
+      setPreview(data);
+      setLoading(false);
+    } catch (err) {
+      clearInterval(interval); setError(err.message); setLoading(false);
+    }
+  };
+
+  useEffect(() => { if (step === 8 && !preview && !loading) generarPreview(); }, [step]);
+
+  // ── Aprobar: envío real ──
+  const aprobar = async () => {
+    setAprobando(true); setError(null);
+    try {
+      const res = await fetch("/api/generate-campaign", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildPayload(false)),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) { setError(data.error || "Error al crear la campaña"); setAprobando(false); return; }
+      setResult(data);
+    } catch (err) { setError(err.message); }
+    setAprobando(false);
   };
 
   const loadAnalysis = async () => {
@@ -85,34 +196,15 @@ export default function App() {
     setAnalysisLoading(false);
   };
 
-  const handleSubmit = async () => {
-    setLoading(true);
-    setError(null);
-    setLoadingStep(0);
-    const interval = setInterval(() => setLoadingStep(s => Math.min(s + 1, PROGRESS_STEPS.length - 1)), 6000);
-    try {
-      const res = await fetch('/api/generate-campaign', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form)
-      });
-      const data = await res.json();
-      clearInterval(interval);
-      if (!res.ok || !data.success) { setError(data.error || 'Error desconocido'); setLoading(false); return; }
-      setResult(data);
-      setLoading(false);
-    } catch (err) {
-      clearInterval(interval);
-      setError(err.message);
-      setLoading(false);
-    }
-  };
-
   const reset = () => {
     setResult(null); setStep(0); setError(null); setTituloSearch(""); setView("home");
-    setForm({ tipo: "", rango: "", seleccion: "carrito", carrito: "", urls: "", accesorio: "auto", accesorioUrl: "", titulo: "", tituloCustom: false, bajada: "", subject: "", preheader: "", tienePromo: true, dia: "Miércoles", hora: "10:30", modo: "programar", emailPrueba: "dayanmartin@gmail.com", notas: "" });
+    setForm(initialForm()); setExtra({ titulo: [], bajada: [], subject: [], preheader: [] });
+    setClaudeProds(null); setClaudeSel(new Set()); setPreview(null); setPromos(null);
   };
 
+  const fechaLegible = form.fecha
+    ? new Date(form.fecha + "T12:00:00").toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long" })
+    : "";
 
   // HOME SCREEN
   if (view === "home") return (
@@ -122,7 +214,7 @@ export default function App() {
         <button style={s.homeBtn} onClick={() => { setView("create"); setStep(0); }}>
           <span style={{ fontSize: 28, marginBottom: 8, display: 'block' }}>✉️</span>
           <span style={{ fontSize: 16, fontWeight: 700, color: '#111', display: 'block', marginBottom: 4 }}>Crear campaña</span>
-          <span style={{ fontSize: 12, color: '#888' }}>Armá y programá un nuevo email</span>
+          <span style={{ fontSize: 12, color: '#888' }}>Armá, previsualizá y programá un email</span>
         </button>
         <button style={s.homeBtn} onClick={loadAnalysis}>
           <span style={{ fontSize: 28, marginBottom: 8, display: 'block' }}>📊</span>
@@ -133,7 +225,7 @@ export default function App() {
     </div>
   );
 
-  // ANALYSIS SCREEN
+  // ANALYSIS SCREEN (sin cambios v2)
   if (view === "analysis") return (
     <div style={s.container}>
       <div style={s.header}><div style={s.logo}>LIGIER</div><div style={s.sub}>Análisis de campañas</div></div>
@@ -142,7 +234,6 @@ export default function App() {
         {!analysisLoading && analysis?.error && <div style={s.errorBox}>{analysis.error}</div>}
         {!analysisLoading && analysis?.message && <div style={s.card}><p style={{ fontSize: 14, color: '#888', textAlign: 'center' }}>{analysis.message}</p></div>}
         {!analysisLoading && analysis?.overall && <>
-          {/* Overall stats */}
           <div style={s.card}>
             <h2 style={s.stepTitle}>Resumen general</h2>
             <div style={s.summaryBox}>
@@ -158,14 +249,12 @@ export default function App() {
               {analysis.overall.abuse_rate != null && <div style={s.summaryRow}><span style={s.summaryLabel}>Quejas spam</span><span style={s.summaryValue}>{analysis.overall.abuse_rate}%</span></div>}
             </div>
           </div>
-          {/* Insights */}
           {analysis.insights?.length > 0 && <div style={s.card}>
             <h2 style={s.stepTitle}>Qué aprendimos</h2>
             {analysis.insights.map((ins, i) => (
               <div key={i} style={{ padding: '12px 14px', background: '#f4f1ec', borderRadius: 2, marginBottom: 8, fontSize: 13, color: '#111', lineHeight: 1.5 }}>💡 {ins}</div>
             ))}
           </div>}
-          {/* By type */}
           {analysis.byTipo?.length > 0 && <div style={s.card}>
             <h2 style={s.stepTitle}>Por tipo de email</h2>
             <div style={s.summaryBox}>
@@ -185,7 +274,7 @@ export default function App() {
 
   if (loading) return (
     <div style={s.container}>
-      <div style={s.header}><div style={s.logo}>LIGIER</div><div style={s.sub}>Generando campaña</div></div>
+      <div style={s.header}><div style={s.logo}>LIGIER</div><div style={s.sub}>Generando vista previa</div></div>
       <div style={{ ...s.card, textAlign: 'center', paddingTop: 48, paddingBottom: 48 }}>
         <div style={s.spinner} />
         <p style={s.loadingText}>{PROGRESS_STEPS[loadingStep]}</p>
@@ -202,9 +291,10 @@ export default function App() {
         <h2 style={s.successTitle}>{result.isDraft ? 'Borrador creado' : 'Campaña programada'}</h2>
         <div style={s.summaryBox}>
           {[
+            { label: "Canal", value: result.canal === 'lgr' ? 'LGR · base propia (AWS)' : 'Mailchimp' },
             { label: "Campaña", value: result.campaignName },
-            result.isDraft ? null : { label: "Programada", value: new Date(result.scheduleTime).toLocaleString('es-AR') },
-            { label: "Prueba enviada a", value: result.testEmail },
+            result.isDraft || !result.scheduleTime ? null : { label: "Programada", value: new Date(result.scheduleTime).toLocaleString('es-AR') },
+            result.testEmail ? { label: "Prueba enviada a", value: result.testEmail } : null,
             { label: "Productos", value: `${result.productsFound} productos` },
           ].filter(Boolean).map((item, i) => (
             <div key={i} style={s.summaryRow}>
@@ -214,6 +304,7 @@ export default function App() {
           ))}
         </div>
         {result.mailchimpUrl && <a href={result.mailchimpUrl} target="_blank" rel="noopener noreferrer" style={s.mcLink}>Ver en Mailchimp →</a>}
+        {result.lgrUrl && <a href={result.lgrUrl} target="_blank" rel="noopener noreferrer" style={s.mcLink}>Ver en LGR →</a>}
         <button style={s.resetBtn} onClick={reset}>Nueva campaña</button>
       </div>
     </div>
@@ -255,6 +346,7 @@ export default function App() {
             {[
               { id: "carrito", label: "Link del carrito", sub: "Generaste el carrito en el sitio" },
               { id: "urls", label: "URLs de productos", sub: "Pegás los links uno por uno" },
+              { id: "claude", label: "✨ Claude elige", sub: "Le das rango de precio y notas; arma la selección" },
             ].map(m => (
               <button key={m.id} style={{ ...s.modeBtn, background: form.seleccion === m.id ? '#111' : '#fff', color: form.seleccion === m.id ? '#fff' : '#111', border: `2px solid ${form.seleccion === m.id ? '#111' : '#e8e8e8'}` }} onClick={() => update('seleccion', m.id)}>
                 <span style={{ fontSize: 14, fontWeight: 700, display: 'block', marginBottom: 2 }}>{m.label}</span>
@@ -270,13 +362,34 @@ export default function App() {
             <label style={s.label}>URLs (una por línea)</label>
             <textarea style={s.textarea} placeholder={"https://vinotecaligier.com/producto-1.html\n..."} value={form.urls} onChange={e => update('urls', e.target.value)} rows={7} />
           </>}
-          {form.tipo && !['vinos-guardados','wine-club','experiencias'].includes(form.tipo) && <>
-            <label style={{ ...s.label, marginTop: 20 }}>Rango de precio (opcional)</label>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+          {form.seleccion === 'claude' && <>
+            <label style={s.label}>Rango de precio *</label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
               {RANGOS.map(r => (
                 <button key={r} style={{ ...s.rangoBtn, background: form.rango === r ? '#111' : '#fff', color: form.rango === r ? '#fff' : '#111', border: `2px solid ${form.rango === r ? '#111' : '#e8e8e8'}` }} onClick={() => update('rango', r)}>${r}</button>
               ))}
             </div>
+            <label style={s.label}>Notas (cepas, bodegas, marcas — opcional)</label>
+            <textarea style={s.textarea} placeholder="Ej: malbecs de Altamira, sumá un cabernet franc, nada de Catena..." value={form.notas} onChange={e => update('notas', e.target.value)} rows={3} />
+            <button style={{ ...s.nextBtn, width: '100%', marginTop: 12, opacity: form.rango && !buscandoProds ? 1 : 0.4 }} disabled={!form.rango || buscandoProds} onClick={buscarConClaude}>
+              {buscandoProds ? 'Buscando en el catálogo…' : claudeProds ? '↻ Buscar otra tanda' : '✨ Buscar con Claude'}
+            </button>
+            {claudeProds?.criterio && <p style={{ fontSize: 12, color: '#888', marginTop: 12, fontStyle: 'italic' }}>“{claudeProds.criterio}”</p>}
+            {claudeProds?.productos?.length > 0 && (
+              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {claudeProds.productos.map(p => {
+                  const on = claudeSel.has(p.sku);
+                  return (
+                    <button key={p.sku} style={{ ...s.modeBtn, border: `2px solid ${on ? '#111' : '#e8e8e8'}`, background: '#fff', color: '#111', opacity: on ? 1 : 0.45 }}
+                      onClick={() => setClaudeSel(prev => { const n = new Set(prev); n.has(p.sku) ? n.delete(p.sku) : n.add(p.sku); return n; })}>
+                      <span style={{ fontSize: 13, fontWeight: 700, display: 'block' }}>{on ? '✓ ' : ''}{p.name} — ${Number(p.price).toLocaleString('es-AR')}</span>
+                      <span style={{ fontSize: 11, opacity: 0.7 }}>{p.motivo}</span>
+                    </button>
+                  );
+                })}
+                <p style={{ fontSize: 11, color: '#aaa' }}>Tocá para sacar/incluir. Siguen {claudeSel.size} seleccionados.</p>
+              </div>
+            )}
           </>}
         </>}
 
@@ -285,7 +398,7 @@ export default function App() {
           <h2 style={s.stepTitle}>Artículo complementario</h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
             {[
-              { id: "auto", label: "Claude elige automáticamente", sub: "Busca el accesorio más afín a los productos" },
+              { id: "auto", label: "✨ Claude elige", sub: "Busca en el catálogo el accesorio más afín a los productos" },
               { id: "manual", label: "Yo elijo el accesorio", sub: "Pegás la URL del producto" },
               { id: "ninguno", label: "Sin accesorio", sub: "El email va sin sección complementaria" },
             ].map(m => (
@@ -301,10 +414,13 @@ export default function App() {
           </>}
         </>}
 
-        {/* STEP 3 — Título */}
+        {/* STEP 3 — Título / bajada / subject / preheader, todos con "sugerir nuevos" */}
         {step === 3 && <>
           <h2 style={s.stepTitle}>Título del email</h2>
-          <input style={{ ...s.input, marginBottom: 16 }} placeholder="Buscar título..." value={tituloSearch} onChange={e => setTituloSearch(e.target.value)} />
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+            <input style={{ ...s.input, marginBottom: 0, flex: 1 }} placeholder="Buscar título..." value={tituloSearch} onChange={e => setTituloSearch(e.target.value)} />
+            <button style={s.sugerirBtn} disabled={sugiriendo === 'titulo'} onClick={() => sugerir('titulo')}>{sugiriendo === 'titulo' ? '…' : '✨ Sugerir nuevos'}</button>
+          </div>
           <div style={{ maxHeight: 280, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
             {titulosFiltrados.map((t, i) => (
               <button key={i} style={{ ...s.tituloBtn, background: form.titulo === t ? '#111' : '#fff', color: form.titulo === t ? '#fff' : '#111', border: `1.5px solid ${form.titulo === t ? '#111' : '#e8e8e8'}` }} onClick={() => { update('titulo', t); update('tituloCustom', false); }}>
@@ -320,7 +436,8 @@ export default function App() {
             />
           </div>
           <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 16, marginTop: 16 }}>
-            <label style={s.label}>Bajada (texto bajo el título)</label>
+            <div style={s.labelRow}><label style={s.label}>Bajada (texto bajo el título)</label>
+              <button style={s.sugerirBtn} disabled={sugiriendo === 'bajada'} onClick={() => sugerir('bajada')}>{sugiriendo === 'bajada' ? '…' : '✨'}</button></div>
             <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
               {bajadasDisponibles.map((b, i) => (
                 <button key={i} style={{ ...s.tituloBtn, background: form.bajada === b ? '#111' : '#fff', color: form.bajada === b ? '#fff' : '#111', border: `1.5px solid ${form.bajada === b ? '#111' : '#e8e8e8'}`, fontSize: 13 }}
@@ -334,7 +451,8 @@ export default function App() {
             />
           </div>
           <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 16, marginTop: 16 }}>
-            <label style={s.label}>Asunto del email (lo que se ve en la bandeja)</label>
+            <div style={s.labelRow}><label style={s.label}>Asunto del email (lo que se ve en la bandeja)</label>
+              <button style={s.sugerirBtn} disabled={sugiriendo === 'subject'} onClick={() => sugerir('subject')}>{sugiriendo === 'subject' ? '…' : '✨'}</button></div>
             <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
               {subjectsDisponibles.map((sj, i) => (
                 <button key={i} style={{ ...s.tituloBtn, background: form.subject === sj ? '#111' : '#fff', color: form.subject === sj ? '#fff' : '#111', border: `1.5px solid ${form.subject === sj ? '#111' : '#e8e8e8'}`, fontSize: 13 }}
@@ -347,7 +465,8 @@ export default function App() {
             />
           </div>
           <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 16, marginTop: 16 }}>
-            <label style={s.label}>Preheader (texto de preview — complementa el asunto)</label>
+            <div style={s.labelRow}><label style={s.label}>Preheader (texto de preview — complementa el asunto)</label>
+              <button style={s.sugerirBtn} disabled={sugiriendo === 'preheader'} onClick={() => sugerir('preheader')}>{sugiriendo === 'preheader' ? '…' : '✨'}</button></div>
             <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
               {preheadersDisponibles.map((ph, i) => (
                 <button key={i} style={{ ...s.tituloBtn, background: form.preheader === ph ? '#111' : '#fff', color: form.preheader === ph ? '#fff' : '#111', border: `1.5px solid ${form.preheader === ph ? '#111' : '#e8e8e8'}`, fontSize: 13 }}
@@ -361,13 +480,20 @@ export default function App() {
           </div>
         </>}
 
-        {/* STEP 4 — Promos */}
+        {/* STEP 4 — Promos (sin notas — pasaron a Productos→Claude) */}
         {step === 4 && <>
           <h2 style={s.stepTitle}>¿Aplica promoción?</h2>
-          <p style={{ fontSize: 13, color: '#888', marginBottom: 20, lineHeight: 1.5 }}>¿El total del carrito ya incluye algún descuento o promoción aplicada por Magento?</p>
+          {promos?.promos?.length > 0 && (
+            <div style={{ background: '#f4f1ec', borderRadius: 2, padding: '12px 14px', marginBottom: 16 }}>
+              <p style={{ ...s.label, marginBottom: 8 }}>Promociones vigentes {promos.fuente === 'magento' ? 'en Magento' : ''}</p>
+              {promos.promos.map((p, i) => (
+                <p key={i} style={{ fontSize: 13, color: '#111', margin: '4px 0' }}>· <strong>{p.nombre}</strong>{p.descripcion ? ` — ${p.descripcion}` : ''}</p>
+              ))}
+            </div>
+          )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {[
-              { id: true, label: "Sí, hay promoción activa", sub: "Ej: 6x5, descuento porcentual, etc." },
+              { id: true, label: "Sí, hay promoción activa", sub: "El total del pack se lee del carrito real (con el descuento aplicado)" },
               { id: false, label: "No, precio de lista", sub: "Sin descuentos aplicados" },
             ].map(m => (
               <button key={String(m.id)} style={{ ...s.modeBtn, background: form.tienePromo === m.id ? '#111' : '#fff', color: form.tienePromo === m.id ? '#fff' : '#111', border: `2px solid ${form.tienePromo === m.id ? '#111' : '#e8e8e8'}` }} onClick={() => update('tienePromo', m.id)}>
@@ -376,33 +502,59 @@ export default function App() {
               </button>
             ))}
           </div>
-          <div style={{ marginTop: 20 }}>
-            <label style={s.label}>Notas adicionales (opcional)</label>
-            <textarea style={s.textarea} placeholder="Ej: enfocarse en Malbecs de Altamira..." value={form.notas} onChange={e => update('notas', e.target.value)} rows={3} />
-          </div>
         </>}
 
-        {/* STEP 5 — Fecha */}
+        {/* STEP 5 — Fecha (calendario) */}
         {step === 5 && <>
           <h2 style={s.stepTitle}>¿Cuándo se manda?</h2>
-          <label style={s.label}>Día</label>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6, marginTop: 8, marginBottom: 20 }}>
-            {DIAS.map(d => (
-              <button key={d} style={{ ...s.diaBtn, background: form.dia === d ? '#111' : '#fff', color: form.dia === d ? '#fff' : '#111', border: `2px solid ${form.dia === d ? '#111' : '#e8e8e8'}` }} onClick={() => update('dia', d)}>{d.slice(0,3)}</button>
-            ))}
-          </div>
+          <label style={s.label}>Fecha</label>
+          <input type="date" style={{ ...s.input, marginBottom: 4 }} value={form.fecha}
+            min={new Date().toISOString().slice(0, 10)}
+            onChange={e => update('fecha', e.target.value)} />
+          {fechaLegible && <p style={{ fontSize: 12, color: '#888', marginBottom: 16, textTransform: 'capitalize' }}>{fechaLegible}</p>}
           <label style={s.label}>Hora</label>
           <input type="time" style={{ ...s.input, marginBottom: 0 }} value={form.hora} onChange={e => update('hora', e.target.value)} />
         </>}
 
-        {/* STEP 6 — Opciones */}
+        {/* STEP 6 — Canal de envío (NUEVO) */}
         {step === 6 && <>
+          <h2 style={s.stepTitle}>¿Por qué canal sale?</h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+            {[
+              { id: "mailchimp", label: "Mailchimp", sub: "La audiencia de siempre, como hasta ahora" },
+              { id: "lgr", label: "LGR · base propia", sub: "Sale por AWS a nuestra base (38.950 suscriptos), con métricas propias" },
+            ].map(m => (
+              <button key={m.id} style={{ ...s.modeBtn, background: form.canal === m.id ? '#111' : '#fff', color: form.canal === m.id ? '#fff' : '#111', border: `2px solid ${form.canal === m.id ? '#111' : '#e8e8e8'}` }} onClick={() => update('canal', m.id)}>
+                <span style={{ fontSize: 14, fontWeight: 700, display: 'block', marginBottom: 2 }}>{m.label}</span>
+                <span style={{ fontSize: 12, opacity: 0.7 }}>{m.sub}</span>
+              </button>
+            ))}
+          </div>
+          {form.canal === 'lgr' && <>
+            <label style={s.label}>Lista / segmento destinatario *</label>
+            {!listasLgr && <p style={{ fontSize: 13, color: '#888' }}>Cargando listas de LGR…</p>}
+            {listasLgr?.error && <div style={s.errorBox}>{listasLgr.error}</div>}
+            {listasLgr?.listas && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {listasLgr.listas.map(l => (
+                  <button key={l.id} style={{ ...s.modeBtn, background: String(form.lista_id) === String(l.id) ? '#111' : '#fff', color: String(form.lista_id) === String(l.id) ? '#fff' : '#111', border: `2px solid ${String(form.lista_id) === String(l.id) ? '#111' : '#e8e8e8'}` }} onClick={() => update('lista_id', l.id)}>
+                    <span style={{ fontSize: 13, fontWeight: 700 }}>{l.tipo === 'dinamica' ? '⚡' : '📋'} {l.nombre}</span>
+                    <span style={{ fontSize: 11, opacity: 0.7, display: 'block' }}>{l.aptos_envio.toLocaleString('es-AR')} contactos aptos</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </>}
+        </>}
+
+        {/* STEP 7 — Opciones */}
+        {step === 7 && <>
           <h2 style={s.stepTitle}>Opciones de envío</h2>
-          <label style={s.label}>¿Crear campaña o borrador?</label>
+          <label style={s.label}>¿Programar o guardar borrador?</label>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
             {[
-              { id: "programar", label: "Crear y programar", sub: `Se manda el ${form.dia} a las ${form.hora}` },
-              { id: "borrador", label: "Solo guardar borrador", sub: "Lo revisás en Mailchimp antes de mandar" },
+              { id: "programar", label: "Crear y programar", sub: `Se manda el ${fechaLegible || form.fecha} a las ${form.hora}` },
+              { id: "borrador", label: "Solo guardar borrador", sub: form.canal === 'lgr' ? "Lo revisás en LGR antes de mandar" : "Lo revisás en Mailchimp antes de mandar" },
             ].map(m => (
               <button key={m.id} style={{ ...s.modeBtn, background: form.modo === m.id ? '#111' : '#fff', color: form.modo === m.id ? '#fff' : '#111', border: `2px solid ${form.modo === m.id ? '#111' : '#e8e8e8'}` }} onClick={() => update('modo', m.id)}>
                 <span style={{ fontSize: 14, fontWeight: 700, display: 'block', marginBottom: 2 }}>{m.label}</span>
@@ -410,44 +562,54 @@ export default function App() {
               </button>
             ))}
           </div>
-          <label style={s.label}>Email de prueba</label>
-          <input style={s.input} type="email" value={form.emailPrueba} onChange={e => update('emailPrueba', e.target.value)} placeholder="email@ejemplo.com" />
+          {form.canal === 'mailchimp' && <>
+            <label style={s.label}>Email de prueba</label>
+            <input style={s.input} type="email" value={form.emailPrueba} onChange={e => update('emailPrueba', e.target.value)} placeholder="email@ejemplo.com" />
+          </>}
         </>}
 
-        {/* STEP 7 — Confirmar */}
-        {step === 7 && <>
-          <h2 style={s.stepTitle}>Confirmar</h2>
+        {/* STEP 8 — Vista previa + Aprobar */}
+        {step === 8 && <>
+          <h2 style={s.stepTitle}>Vista previa</h2>
           {error && <div style={s.errorBox}>{error}</div>}
-          <div style={s.summaryBox}>
-            {[
-              { label: "Tipo", value: selectedTipo?.label },
-              { label: "Selección", value: form.seleccion === 'carrito' ? 'Link de carrito' : 'URLs de productos' },
-              { label: "Accesorio", value: form.accesorio === 'auto' ? 'Claude elige' : form.accesorio === 'ninguno' ? 'Sin accesorio' : 'Manual' },
-              { label: "Título", value: form.titulo.replace(/\n/g, ' · ') },
-              { label: "Asunto", value: form.subject || '(default por tipo)' },
-              { label: "Preheader", value: form.preheader || '(default por tipo)' },
-              { label: "Promoción", value: form.tienePromo ? 'Sí' : 'No' },
-              { label: "Envío", value: form.modo === 'borrador' ? 'Borrador' : `${form.dia} · ${form.hora}` },
-              { label: "Email prueba", value: form.emailPrueba },
-            ].map((item, i) => (
-              <div key={i} style={s.summaryRow}>
-                <span style={s.summaryLabel}>{item.label}</span>
-                <span style={s.summaryValue}>{item.value}</span>
-              </div>
-            ))}
-          </div>
+          {preview && <>
+            <div style={s.summaryBox}>
+              {[
+                { label: "Canal", value: form.canal === 'lgr' ? 'LGR · base propia' : 'Mailchimp' },
+                { label: "Asunto", value: preview.subject },
+                { label: "Preheader", value: preview.preheader },
+                { label: "Productos", value: `${preview.productsFound}` },
+                preview.cartTotal ? { label: "Total del pack", value: preview.cartTotal } : null,
+                { label: "Envío", value: form.modo === 'borrador' ? 'Borrador' : `${fechaLegible} · ${form.hora}` },
+              ].filter(Boolean).map((item, i) => (
+                <div key={i} style={s.summaryRow}>
+                  <span style={s.summaryLabel}>{item.label}</span>
+                  <span style={s.summaryValue}>{item.value}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ border: '1.5px solid #e8e8e8', borderRadius: 2, marginTop: 16, height: 480, overflow: 'hidden' }}>
+              <iframe title="preview" srcDoc={preview.html} style={{ width: '100%', height: '100%', border: 'none' }} sandbox="" />
+            </div>
+            <button style={{ ...s.nextBtn, width: '100%', marginTop: 16, opacity: aprobando ? 0.5 : 1 }} disabled={aprobando} onClick={aprobar}>
+              {aprobando ? 'Creando campaña…' : form.modo === 'borrador' ? '✓ Aprobar y guardar borrador' : '✓ Aprobar y programar'}
+            </button>
+            <button style={{ ...s.resetBtn, marginTop: 8 }} disabled={loading} onClick={generarPreview}>↻ Regenerar vista previa</button>
+          </>}
+          {!preview && !loading && error && (
+            <button style={{ ...s.resetBtn, marginTop: 8 }} onClick={generarPreview}>↻ Reintentar</button>
+          )}
         </>}
       </div>
 
       {/* Nav */}
       <div style={s.nav}>
-        <button style={s.backBtn} onClick={() => { if (step === 0) { setView('home'); } else { setError(null); setStep(s => s - 1); } }}>← Volver</button>
-        {step < STEPS.length - 1
-          ? <button style={{ ...s.nextBtn, opacity: canNext() ? 1 : 0.4 }} disabled={!canNext()} onClick={() => setStep(s => s + 1)}>Continuar →</button>
-          : <button style={s.nextBtn} onClick={handleSubmit}>
-              {form.modo === 'borrador' ? 'Guardar borrador →' : 'Generar y programar →'}
-            </button>
-        }
+        <button style={s.backBtn} onClick={() => { if (step === 0) { setView('home'); } else { setError(null); if (step === 8) setPreview(null); setStep(s2 => s2 - 1); } }}>← Volver</button>
+        {step < STEPS.length - 1 && (
+          <button style={{ ...s.nextBtn, opacity: canNext() ? 1 : 0.4 }} disabled={!canNext()} onClick={() => setStep(s2 => s2 + 1)}>
+            {step === STEPS.length - 2 ? 'Generar vista previa →' : 'Continuar →'}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -470,9 +632,10 @@ const s = {
   rangoBtn: { padding: '10px 8px', borderRadius: 2, cursor: 'pointer', fontSize: 12, fontWeight: 700, transition: 'all 0.15s' },
   tituloBtn: { textAlign: 'left', padding: '12px 14px', borderRadius: 2, cursor: 'pointer', transition: 'all 0.15s', lineHeight: 1.4, fontSize: 14, fontWeight: 500 },
   label: { display: 'block', fontSize: 10, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: '#aaa', marginBottom: 8 },
+  labelRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  sugerirBtn: { padding: '8px 12px', background: '#fff', border: '1.5px solid #111', borderRadius: 2, fontSize: 11, fontWeight: 700, cursor: 'pointer', color: '#111', whiteSpace: 'nowrap' },
   textarea: { width: '100%', padding: 12, border: '1.5px solid #e8e8e8', borderRadius: 2, fontSize: 13, fontFamily: 'monospace', resize: 'vertical', boxSizing: 'border-box', outline: 'none' },
   input: { width: '100%', padding: 12, border: '1.5px solid #e8e8e8', borderRadius: 2, fontSize: 14, boxSizing: 'border-box', outline: 'none', fontFamily: 'Georgia, serif' },
-  diaBtn: { padding: '10px 4px', borderRadius: 2, cursor: 'pointer', fontSize: 11, fontWeight: 700, transition: 'all 0.15s' },
   summaryBox: { border: '1.5px solid #e8e8e8', borderRadius: 2, overflow: 'hidden' },
   summaryRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 16px', borderBottom: '1px solid #f0f0f0' },
   summaryLabel: { fontSize: 10, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: '#aaa' },
