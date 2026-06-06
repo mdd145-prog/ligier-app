@@ -73,8 +73,23 @@ const RANGO_LIMITES = {
   '60-90k': [60000, 90000], '90-120k': [90000, 120000], '+120k': [120000, 100000000],
 };
 
-async function buscarCandidatosMagento(min, max) {
-  // Productos simples, habilitados, dentro del rango — hasta 80 candidatos
+// Categorías reales de Magento (árbol relevado 6 jun 2026) — el picker NUNCA
+// mezcla caminos: un email de vinos solo trae de Vinos (882), nunca de
+// Guardados (883), y viceversa.
+const CATEGORIAS = {
+  'vinos': 882,
+  'vinos-guardados': 883,
+  'whisky': 16,
+  'espirituosas': 10,
+  'wine-club': 891,
+  'gift-cards': 7,
+};
+// Atributo `contenido` = presentación en ml; opción 25 = 750ml.
+const CONTENIDO_750 = 25;
+
+async function buscarCandidatosMagento(min, max, tipo) {
+  const catId = CATEGORIAS[tipo];
+  // Productos habilitados, de LA categoría del tipo, presentación 750, en rango
   const params = [
     `searchCriteria[filterGroups][0][filters][0][field]=price`,
     `searchCriteria[filterGroups][0][filters][0][value]=${min}`,
@@ -86,6 +101,14 @@ async function buscarCandidatosMagento(min, max) {
     `searchCriteria[filterGroups][2][filters][0][value]=1`,
     `searchCriteria[filterGroups][3][filters][0][field]=type_id`,
     `searchCriteria[filterGroups][3][filters][0][value]=simple`,
+    ...(catId ? [
+      `searchCriteria[filterGroups][4][filters][0][field]=category_id`,
+      `searchCriteria[filterGroups][4][filters][0][value]=${catId}`,
+      `searchCriteria[filterGroups][4][filters][0][conditionType]=eq`,
+    ] : []),
+    `searchCriteria[filterGroups][5][filters][0][field]=contenido`,
+    `searchCriteria[filterGroups][5][filters][0][value]=${CONTENIDO_750}`,
+    `searchCriteria[filterGroups][5][filters][0][conditionType]=eq`,
     `searchCriteria[pageSize]=80`,
     `fields=items[sku,name,price,custom_attributes]`,
   ].join('&');
@@ -105,11 +128,14 @@ async function buscarCandidatosMagento(min, max) {
   }).filter(p => p.url_key && p.price > 0);
 }
 
-async function elegirProductos({ tipo, rango, notas, cantidad = 6 }) {
+async function elegirProductos({ tipo, rango, notas, cantidad = 6, mantener = [] }) {
   const [min, max] = RANGO_LIMITES[rango] || [20000, 100000000];
-  const candidatos = await buscarCandidatosMagento(min, max);
+  const skusMantener = new Set(mantener.map(m => m.sku));
+  const faltan = Math.max(1, cantidad - mantener.length);
+  const candidatos = (await buscarCandidatosMagento(min, max, tipo))
+    .filter(c => !skusMantener.has(c.sku));
   if (candidatos.length === 0) {
-    return { productos: [], mensaje: 'No encontré productos en ese rango de precio.' };
+    return { productos: [], mensaje: 'No encontré productos de esa categoría en ese rango de precio.' };
   }
 
   const schema = {
@@ -140,11 +166,13 @@ async function elegirProductos({ tipo, rango, notas, cantidad = 6 }) {
     output_config: { format: { type: 'json_schema', schema } },
     messages: [{
       role: 'user',
-      content: `Sos el curador de Vinoteca Ligier. Armá una selección de ${cantidad} productos
-para un email de tipo "${tipo}" eligiendo SOLO de esta lista de candidatos (por sku).
+      content: `Sos el curador de Vinoteca Ligier. ${mantener.length > 0
+  ? `El usuario YA eligió y quiere MANTENER estos ${mantener.length} (no los repitas, complementalos):
+${mantener.map(m => `- ${m.name}`).join('\n')}
+Elegí ${faltan} producto(s) MÁS que combinen con esos, SOLO de la lista de candidatos (por sku).`
+  : `Armá una selección de ${cantidad} productos para un email de tipo "${tipo}" eligiendo SOLO de esta lista de candidatos (por sku).`}
 ${notas ? `Indicaciones del usuario (cepas, bodegas, marcas, estilo): ${notas}` : 'Sin indicaciones extra: buscá variedad coherente (distintas bodegas, estilos complementarios).'}
-Criterios: que la tanda tenga un hilo conductor, sin repetir bodega salvo pedido expreso,
-descartá lo que no corresponda al tipo de email (ej: nada de whisky en un email de vinos).
+Criterios: que la tanda tenga un hilo conductor y no repitas bodega salvo pedido expreso.
 
 CANDIDATOS:
 ${candidatos.map(c => `- sku:${c.sku} | ${c.name} | $${c.price}`).join('\n')}`,

@@ -46,7 +46,7 @@ export default function App() {
 
   function initialForm() {
     return {
-      tipo: "", rango: "", seleccion: "carrito", carrito: "", urls: "",
+      tipo: "", rango: "", cantidad: 6, seleccion: "carrito", carrito: "", urls: "",
       accesorio: "auto", accesorioUrl: "",
       titulo: "", tituloCustom: false, bajada: "",
       subject: "", preheader: "",
@@ -103,16 +103,23 @@ export default function App() {
   // ── IA: elegir productos ──
   const buscarConClaude = async () => {
     setBuscandoProds(true); setError(null);
+    // Si ya hay una tanda, los TILDADOS se mantienen y Claude completa los lugares vacíos
+    const mantener = claudeProds
+      ? claudeProds.productos.filter(p => claudeSel.has(p.sku)).map(p => ({ sku: p.sku, name: p.name }))
+      : [];
     try {
       const res = await fetch("/api/assist", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accion: "productos", tipo: form.tipo, rango: form.rango, notas: form.notas }),
+        body: JSON.stringify({ accion: "productos", tipo: form.tipo, rango: form.rango, notas: form.notas, cantidad: form.cantidad, mantener }),
       });
       const data = await res.json();
       if (data.error) { setError(data.error); }
       else {
-        setClaudeProds(data);
-        setClaudeSel(new Set((data.productos || []).map(p => p.sku)));
+        const mantenidos = claudeProds ? claudeProds.productos.filter(p => claudeSel.has(p.sku)) : [];
+        const nuevos = (data.productos || []).filter(p => !mantenidos.some(m => m.sku === p.sku));
+        const productos = [...mantenidos, ...nuevos];
+        setClaudeProds({ ...data, productos });
+        setClaudeSel(new Set(productos.map(p => p.sku)));
       }
     } catch (e) { setError(e.message); }
     setBuscandoProds(false);
@@ -363,6 +370,12 @@ export default function App() {
             <textarea style={s.textarea} placeholder={"https://vinotecaligier.com/producto-1.html\n..."} value={form.urls} onChange={e => update('urls', e.target.value)} rows={7} />
           </>}
           {form.seleccion === 'claude' && <>
+            <label style={s.label}>¿Cuántas botellas? *</label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6, marginBottom: 16 }}>
+              {[3, 4, 6, 8, 10, 12].map(n => (
+                <button key={n} style={{ ...s.rangoBtn, background: form.cantidad === n ? '#111' : '#fff', color: form.cantidad === n ? '#fff' : '#111', border: `2px solid ${form.cantidad === n ? '#111' : '#e8e8e8'}` }} onClick={() => update('cantidad', n)}>{n}</button>
+              ))}
+            </div>
             <label style={s.label}>Rango de precio *</label>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
               {RANGOS.map(r => (
@@ -372,7 +385,7 @@ export default function App() {
             <label style={s.label}>Notas (cepas, bodegas, marcas — opcional)</label>
             <textarea style={s.textarea} placeholder="Ej: malbecs de Altamira, sumá un cabernet franc, nada de Catena..." value={form.notas} onChange={e => update('notas', e.target.value)} rows={3} />
             <button style={{ ...s.nextBtn, width: '100%', marginTop: 12, opacity: form.rango && !buscandoProds ? 1 : 0.4 }} disabled={!form.rango || buscandoProds} onClick={buscarConClaude}>
-              {buscandoProds ? 'Buscando en el catálogo…' : claudeProds ? '↻ Buscar otra tanda' : '✨ Buscar con Claude'}
+              {buscandoProds ? 'Buscando en el catálogo…' : claudeProds ? `↻ Completar la tanda (mantiene ${claudeSel.size} tildados)` : '✨ Buscar con Claude'}
             </button>
             {claudeProds?.criterio && <p style={{ fontSize: 12, color: '#888', marginTop: 12, fontStyle: 'italic' }}>“{claudeProds.criterio}”</p>}
             {claudeProds?.productos?.length > 0 && (
@@ -387,7 +400,7 @@ export default function App() {
                     </button>
                   );
                 })}
-                <p style={{ fontSize: 11, color: '#aaa' }}>Tocá para sacar/incluir. Siguen {claudeSel.size} seleccionados.</p>
+                <p style={{ fontSize: 11, color: '#aaa' }}>Tocá para destildar lo que no te convence y apretá "↻ Completar la tanda": los tildados se quedan, Claude repone el resto. Van {claudeSel.size} de {form.cantidad}.</p>
               </div>
             )}
           </>}
