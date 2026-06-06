@@ -414,7 +414,7 @@ async function claudePickAccessory(tipo, products) {
     const candidates = [];
     for (const t of terms) {
       const url = `${MAGENTO_BASE}/rest/V1/products?searchCriteria[filterGroups][0][filters][0][field]=name&searchCriteria[filterGroups][0][filters][0][value]=%25${t}%25&searchCriteria[filterGroups][0][filters][0][conditionType]=like&searchCriteria[filterGroups][1][filters][0][field]=status&searchCriteria[filterGroups][1][filters][0][value]=1&searchCriteria[pageSize]=10&fields=items[sku,name,price,custom_attributes]`;
-      const r = await fetchWithTimeout(url, { headers: { Authorization: `Bearer ${MAGENTO_TOKEN}` } }, 8000);
+      const r = await fetchWithTimeout(url, { headers: { Authorization: `Bearer ${MAGENTO_TOKEN}`, 'User-Agent': 'Mozilla/5.0 (Macintosh)' } }, 8000);
       if (!r.ok) continue;
       const d = await r.json();
       for (const p of d.items || []) {

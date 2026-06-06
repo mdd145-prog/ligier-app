@@ -332,6 +332,7 @@ export default function App() {
       </div>
 
       <div style={s.card}>
+        {error && step !== 8 && <div style={s.errorBox}>{error}</div>}
 
         {/* STEP 0 — Tipo */}
         {step === 0 && <>

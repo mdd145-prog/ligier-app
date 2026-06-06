@@ -34,6 +34,25 @@ async function fetchTimeout(url, options = {}, ms = 8000) {
   }
 }
 
+// Magento (Nexcess) tiene escudo anti-bots: sin User-Agent de navegador devuelve
+// 429 determinístico. UA real + reintentos con backoff (mismo fix probado en LGR).
+const UA_NAVEGADOR = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36';
+async function mgFetch(url, ms = 12000) {
+  for (const espera of [0, 4000, 8000]) {
+    if (espera) await new Promise(r => setTimeout(r, espera));
+    const res = await fetchTimeout(url, {
+      headers: {
+        Authorization: `Bearer ${MAGENTO_TOKEN}`,
+        'User-Agent': UA_NAVEGADOR,
+        Accept: 'application/json',
+        'Accept-Language': 'es-AR,es;q=0.9',
+      },
+    }, ms);
+    if (res.status !== 429) return res;
+  }
+  throw new Error('Magento sigue limitando (429) tras 3 intentos');
+}
+
 // ── copys ────────────────────────────────────────────────────────────────
 async function sugerirCopys({ campo, tipo, contexto }) {
   const schema = {
@@ -88,6 +107,20 @@ const CATEGORIAS = {
 const CONTENIDO_750 = 25;
 
 async function buscarCandidatosMagento(min, max, tipo) {
+  // Vía LGR (IP whitelisteada en Nexcess + caché 10 min) — adiós ruleta del 429
+  if (LGR_API_URL && LGR_API_TOKEN) {
+    const res = await fetchTimeout(
+      `${LGR_API_URL}/api/publico/mkt/magento-productos?tipo=${encodeURIComponent(tipo)}&min=${min}&max=${max}`,
+      { headers: { 'X-LGR-Token': LGR_API_TOKEN, Accept: 'application/json' } }, 30000
+    );
+    if (!res.ok) throw new Error(`Proxy LGR ${res.status}`);
+    const data = await res.json();
+    return (data.items || []).filter(p => p.url_key && p.price > 0);
+  }
+  return buscarCandidatosMagentoDirecto(min, max, tipo);
+}
+
+async function buscarCandidatosMagentoDirecto(min, max, tipo) {
   const catId = CATEGORIAS[tipo];
   // Productos habilitados, de LA categoría del tipo, presentación 750, en rango
   const params = [
@@ -112,9 +145,7 @@ async function buscarCandidatosMagento(min, max, tipo) {
     `searchCriteria[pageSize]=80`,
     `fields=items[sku,name,price,custom_attributes]`,
   ].join('&');
-  const res = await fetchTimeout(`${MAGENTO_BASE}/rest/V1/products?${params}`, {
-    headers: { Authorization: `Bearer ${MAGENTO_TOKEN}` },
-  }, 12000);
+  const res = await mgFetch(`${MAGENTO_BASE}/rest/V1/products?${params}`);
   if (!res.ok) throw new Error(`Magento ${res.status}`);
   const data = await res.json();
   return (data.items || []).map(p => {
@@ -195,15 +226,24 @@ ${candidatos.map(c => `- sku:${c.sku} | ${c.name} | $${c.price}`).join('\n')}`,
 
 // ── promos vigentes ──────────────────────────────────────────────────────
 async function promosVigentes() {
+  // Vía LGR (cacheado). Fallback: directo a Magento; último recurso: default 6×5.
+  if (LGR_API_URL && LGR_API_TOKEN) {
+    try {
+      const res = await fetchTimeout(`${LGR_API_URL}/api/publico/mkt/magento-promos`,
+        { headers: { 'X-LGR-Token': LGR_API_TOKEN, Accept: 'application/json' } }, 20000);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.promos?.length) return { promos: data.promos, fuente: 'magento' };
+      }
+    } catch (e) { /* sigue al fallback */ }
+  }
   try {
     const params = [
       'searchCriteria[filterGroups][0][filters][0][field]=is_active',
       'searchCriteria[filterGroups][0][filters][0][value]=1',
       'searchCriteria[pageSize]=20',
     ].join('&');
-    const res = await fetchTimeout(`${MAGENTO_BASE}/rest/V1/salesRules/search?${params}`, {
-      headers: { Authorization: `Bearer ${MAGENTO_TOKEN}` },
-    }, 8000);
+    const res = await mgFetch(`${MAGENTO_BASE}/rest/V1/salesRules/search?${params}`, 8000);
     if (!res.ok) throw new Error(String(res.status));
     const data = await res.json();
     const hoy = new Date().toISOString().slice(0, 10);
