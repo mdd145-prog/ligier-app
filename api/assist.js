@@ -107,15 +107,21 @@ const CATEGORIAS = {
 const CONTENIDO_750 = 25;
 
 async function buscarCandidatosMagento(min, max, tipo) {
-  // Vía LGR (IP whitelisteada en Nexcess + caché 10 min) — adiós ruleta del 429
+  // 1º: vía LGR (caché 2h + última copia buena). 2º: directo desde Vercel.
   if (LGR_API_URL && LGR_API_TOKEN) {
-    const res = await fetchTimeout(
-      `${LGR_API_URL}/api/publico/mkt/magento-productos?tipo=${encodeURIComponent(tipo)}&min=${min}&max=${max}`,
-      { headers: { 'X-LGR-Token': LGR_API_TOKEN, Accept: 'application/json' } }, 30000
-    );
-    if (!res.ok) throw new Error(`Proxy LGR ${res.status}`);
-    const data = await res.json();
-    return (data.items || []).filter(p => p.url_key && p.price > 0);
+    try {
+      const res = await fetchTimeout(
+        `${LGR_API_URL}/api/publico/mkt/magento-productos?tipo=${encodeURIComponent(tipo)}&min=${min}&max=${max}`,
+        { headers: { 'X-LGR-Token': LGR_API_TOKEN, Accept: 'application/json' } }, 45000
+      );
+      if (res.ok) {
+        const data = await res.json();
+        return (data.items || []).filter(p => p.url_key && p.price > 0);
+      }
+      console.error('proxy LGR no disponible:', res.status, '— fallback directo');
+    } catch (e) {
+      console.error('proxy LGR error:', e.message, '— fallback directo');
+    }
   }
   return buscarCandidatosMagentoDirecto(min, max, tipo);
 }
