@@ -112,24 +112,20 @@ export default async function handler(req, res) {
     }
     const finalCtaUrl = ctaUrl || finalCartUrl || 'https://vinotecaligier.com';
 
-    // 2.b. ¿HAY promo? La respuesta NO sale de una tabla en el código:
-    //     se le pregunta a Magento por el grand_total del carrito armado.
-    //     Si Magento aplica algún descuento (6×5, 2×1, $X off, cupón global,
-    //     lo que sea) → grand_total < suma de precios lleno → mostramos
-    //     banda promo y precios rebajados.
-    //     Si los totales coinciden → no hay promo → mail sin banda y precios planos.
-    //     Memoria: feedback-promos-chequear-antes-de-ofrecer.
+    // 2.b. ¿HAY promo? Decisión EXPLÍCITA del caller (workflow/JSON).
+    //
+    // Aprendizaje 25 jun 2026: el `grand_total` del cart de Magento NO basta
+    // para deducir "promo activa". Aunque las reglas de promo estén OFF, el
+    // grand_total puede mostrar diferencias por `special_price` por SKU, lista
+    // de precios mayorista que la sesión agarra, tiers por cantidad, etc.
+    // Comunicar eso como "promo" al cliente es falso.
+    //
+    // Por lo tanto: NO inferimos promo. El caller (n8n / wizard) debe pasar
+    // `withPromo: true` solo cuando sabe que hay una promo real comunicable
+    // para la combinación de productos. Default: sin promo.
+    // Memoria: feedback-promos-chequear-antes-de-ofrecer.
     const sumaPrecioLleno = products.reduce((acc, p) => acc + (parseFloat(p.price) || 0), 0);
-    let magentoGrandTotal = null;
-    if (finalCartUrl && products.length) {
-      magentoGrandTotal = await getCartGrandTotal(finalCartUrl);
-    }
-    const tolerancia = 100; // ARS: margen de redondeo / centavos
-    const magentoTienePromo = magentoGrandTotal != null
-      && magentoGrandTotal < (sumaPrecioLleno - tolerancia);
-    // withPromo del caller solo permite OVERRIDE para downgrade (false fuerza off).
-    // No permite forzar true: la verdad la pone Magento.
-    const finalWithPromo = (withPromo === false) ? false : magentoTienePromo;
+    const finalWithPromo = (withPromo === true);
 
     // 3. Descargar template + inyectar
     const tpl = await fetchTemplate(template);
@@ -158,8 +154,6 @@ export default async function handler(req, res) {
         skusRequested,
         skus: products.map(p => p.sku),
         sumaPrecioLleno,
-        magentoGrandTotal,
-        magentoTienePromo,
         finalWithPromo,
         htmlPreview: html.substring(0, 500) + '...',
         htmlLength: html.length,
@@ -215,8 +209,6 @@ export default async function handler(req, res) {
       skusRequested,
       skus: products.map(p => p.sku),
       sumaPrecioLleno,
-      magentoGrandTotal,
-      magentoTienePromo,
       finalWithPromo,
     });
 
