@@ -52,7 +52,7 @@ export default function App() {
       subject: "", preheader: "",
       tienePromo: true,
       fecha: "", hora: "10:30",
-      canal: "mailchimp", lista_id: "",
+      canal: "brevo", lista_id: "",
       modo: "programar",
       emailPrueba: "dayanmartin@gmail.com",
       notas: "",
@@ -81,7 +81,7 @@ export default function App() {
     if (step === 3) return form.titulo !== "";
     if (step === 4) return true;
     if (step === 5) return form.fecha !== "" && form.hora !== "";
-    if (step === 6) return form.canal === "mailchimp" || (form.canal === "lgr" && form.lista_id !== "");
+    if (step === 6) return form.canal === "brevo" || (form.canal === "lgr" && form.lista_id !== "");
     if (step === 7) return form.canal === "lgr" || form.emailPrueba !== "";
     return true;
   };
@@ -298,7 +298,7 @@ export default function App() {
         <h2 style={s.successTitle}>{result.isDraft ? 'Borrador creado' : 'Campaña programada'}</h2>
         <div style={s.summaryBox}>
           {[
-            { label: "Canal", value: result.canal === 'lgr' ? 'LGR · base propia (AWS)' : 'Mailchimp' },
+            { label: "Canal", value: result.canal === 'lgr' ? 'LGR · base propia (AWS)' : 'Brevo' },
             { label: "Campaña", value: result.campaignName },
             result.isDraft || !result.scheduleTime ? null : { label: "Programada", value: new Date(result.scheduleTime).toLocaleString('es-AR') },
             result.testEmail ? { label: "Prueba enviada a", value: result.testEmail } : null,
@@ -310,7 +310,7 @@ export default function App() {
             </div>
           ))}
         </div>
-        {result.mailchimpUrl && <a href={result.mailchimpUrl} target="_blank" rel="noopener noreferrer" style={s.mcLink}>Ver en Mailchimp →</a>}
+        {result.brevoUrl && <a href={result.brevoUrl} target="_blank" rel="noopener noreferrer" style={s.mcLink}>Ver en Brevo →</a>}
         {result.lgrUrl && <a href={result.lgrUrl} target="_blank" rel="noopener noreferrer" style={s.mcLink}>Ver en LGR →</a>}
         <button style={s.resetBtn} onClick={reset}>Nueva campaña</button>
       </div>
@@ -535,7 +535,7 @@ export default function App() {
           <h2 style={s.stepTitle}>¿Por qué canal sale?</h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
             {[
-              { id: "mailchimp", label: "Mailchimp", sub: "La audiencia de siempre, como hasta ahora" },
+              { id: "brevo", label: "Brevo", sub: "La audiencia de siempre, ahora en Brevo" },
               { id: "lgr", label: "LGR · base propia", sub: "Sale por AWS a nuestra base (38.950 suscriptos), con métricas propias" },
             ].map(m => (
               <button key={m.id} style={{ ...s.modeBtn, background: form.canal === m.id ? '#111' : '#fff', color: form.canal === m.id ? '#fff' : '#111', border: `2px solid ${form.canal === m.id ? '#111' : '#e8e8e8'}` }} onClick={() => update('canal', m.id)}>
@@ -568,7 +568,7 @@ export default function App() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
             {[
               { id: "programar", label: "Crear y programar", sub: `Se manda el ${fechaLegible || form.fecha} a las ${form.hora}` },
-              { id: "borrador", label: "Solo guardar borrador", sub: form.canal === 'lgr' ? "Lo revisás en LGR antes de mandar" : "Lo revisás en Mailchimp antes de mandar" },
+              { id: "borrador", label: "Solo guardar borrador", sub: form.canal === 'lgr' ? "Lo revisás en LGR antes de mandar" : "Lo revisás en Brevo antes de mandar" },
             ].map(m => (
               <button key={m.id} style={{ ...s.modeBtn, background: form.modo === m.id ? '#111' : '#fff', color: form.modo === m.id ? '#fff' : '#111', border: `2px solid ${form.modo === m.id ? '#111' : '#e8e8e8'}` }} onClick={() => update('modo', m.id)}>
                 <span style={{ fontSize: 14, fontWeight: 700, display: 'block', marginBottom: 2 }}>{m.label}</span>
@@ -576,7 +576,7 @@ export default function App() {
               </button>
             ))}
           </div>
-          {form.canal === 'mailchimp' && <>
+          {form.canal === 'brevo' && <>
             <label style={s.label}>Email de prueba</label>
             <input style={s.input} type="email" value={form.emailPrueba} onChange={e => update('emailPrueba', e.target.value)} placeholder="email@ejemplo.com" />
           </>}
@@ -589,7 +589,7 @@ export default function App() {
           {preview && <>
             <div style={s.summaryBox}>
               {[
-                { label: "Canal", value: form.canal === 'lgr' ? 'LGR · base propia' : 'Mailchimp' },
+                { label: "Canal", value: form.canal === 'lgr' ? 'LGR · base propia' : 'Brevo' },
                 { label: "Asunto", value: preview.subject },
                 { label: "Preheader", value: preview.preheader },
                 { label: "Productos", value: `${preview.productsFound}` },
