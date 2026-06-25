@@ -664,45 +664,31 @@ export default async function handler(req, res) {
       });
     }
 
-    // 8b. Mailchimp (canal por defecto)
-    const mcKey = process.env.MAILCHIMP_API_KEY;
-    const dc = mcKey.split('-').pop();
-    const audienceId = process.env.MAILCHIMP_AUDIENCE_ID;
-    const mcBase = `https://${dc}.api.mailchimp.com/3.0`;
-    const mcAuth = 'Basic ' + Buffer.from(`anystring:${mcKey}`).toString('base64');
-    const mcHeaders = { 'Authorization': mcAuth, 'Content-Type': 'application/json' };
+    // 8b. Brevo (canal por defecto). Reemplaza Mailchimp desde el 25 jun 2026.
+    // Brevo expone /v3/emailCampaigns para crear (incluyendo programación) en
+    // una sola llamada, y /v3/emailCampaigns/{id}/sendTest para el preview.
+    const brevoKey = process.env.BREVO_API_KEY;
+    if (!brevoKey) return res.status(500).json({ error: 'Falta BREVO_API_KEY en el entorno' });
+    const brevoBase = 'https://api.brevo.com/v3';
+    const brevoHeaders = { 'api-key': brevoKey, 'accept': 'application/json', 'content-type': 'application/json' };
+
+    const senderEmail = process.env.BREVO_SENDER_EMAIL || 'hola@news.vinotecaligier.com';
+    const senderName = process.env.BREVO_SENDER_NAME || 'Vinoteca Ligier';
+    // listId destino: por payload (lista_id) o env BREVO_DEFAULT_LIST_ID.
+    const brevoListId = parseInt(lista_id || process.env.BREVO_DEFAULT_LIST_ID || '0', 10);
+    if (!brevoListId) return res.status(400).json({ error: 'Falta lista_id en payload o BREVO_DEFAULT_LIST_ID en el entorno' });
+
     const campaignTitle = `Ligier · ${tipo} · ${dia} ${mes}`;
 
-    const createRes = await fetch(`${mcBase}/campaigns`, {
-      method: 'POST', headers: mcHeaders,
-      body: JSON.stringify({
-        type: 'regular',
-        recipients: { list_id: audienceId },
-        settings: { subject_line: subjectFinal, preview_text: preheaderFinal, from_name: 'Ligier', reply_to: 'ventas@ligier.com.ar', title: campaignTitle }
-      })
-    });
-    const campaign = await createRes.json();
-    if (!campaign.id) return res.status(500).json({ error: 'Error Mailchimp', detail: JSON.stringify(campaign) });
-
-    await fetch(`${mcBase}/campaigns/${campaign.id}/content`, {
-      method: 'PUT', headers: mcHeaders, body: JSON.stringify({ html: emailHtml })
-    });
-
-    const testEmail = emailPrueba || 'dayanmartin@gmail.com';
-    await fetch(`${mcBase}/campaigns/${campaign.id}/actions/test`, {
-      method: 'POST', headers: mcHeaders,
-      body: JSON.stringify({ test_emails: [testEmail], send_type: 'html' })
-    });
-
+    // scheduledAt en formato ISO 8601 con offset (Brevo lo acepta). Argentina
+    // es GMT-3 fijo (sin DST): construimos el instante UTC explícito.
     let scheduleTime = null;
     if (modo !== 'borrador') {
       let sendDate;
       if (fecha) {
-        // v2: fecha exacta del calendario (YYYY-MM-DD)
         const [y, mo, d] = fecha.split('-').map(Number);
         sendDate = new Date(y, mo - 1, d);
       } else {
-        // legacy: próximo día de semana
         const diasMap = { Lunes:1, Martes:2, Miércoles:3, Jueves:4, Viernes:5, Sábado:6, Domingo:0 };
         const today = new Date();
         const targetDay = diasMap[dia] ?? 3;
@@ -711,29 +697,53 @@ export default async function handler(req, res) {
         sendDate.setDate(today.getDate() + daysUntil);
       }
       const [h, m] = (hora || '10:30').split(':');
-      // Argentina es GMT-3 fijo (sin DST): construimos el instante UTC explícito
-      // desde la hora local argentina, en vez de sumar 3h asumiendo server UTC.
-      // Equivalente al cálculo anterior cuando el server corre en UTC.
       const utcDate = new Date(Date.UTC(
         sendDate.getFullYear(), sendDate.getMonth(), sendDate.getDate(),
         parseInt(h) + 3, parseInt(m), 0, 0
       ));
       scheduleTime = utcDate.toISOString().replace('.000Z', '+00:00');
-      await fetch(`${mcBase}/campaigns/${campaign.id}/actions/schedule`, {
-        method: 'POST', headers: mcHeaders, body: JSON.stringify({ schedule_time: scheduleTime })
-      });
     }
+
+    const createBody = {
+      name: campaignTitle,
+      subject: subjectFinal,
+      sender: { name: senderName, email: senderEmail },
+      replyTo: 'ventas@ligier.com.ar',
+      htmlContent: emailHtml,
+      preheader: preheaderFinal,
+      recipients: { listIds: [brevoListId] },
+      ...(scheduleTime ? { scheduledAt: scheduleTime } : {}),
+    };
+
+    const createRes = await fetch(`${brevoBase}/emailCampaigns`, {
+      method: 'POST', headers: brevoHeaders, body: JSON.stringify(createBody),
+    });
+    const campaign = await createRes.json();
+    if (!createRes.ok || !campaign.id) {
+      return res.status(500).json({ error: 'Error Brevo crear campaña', detail: JSON.stringify(campaign) });
+    }
+
+    // Envío de prueba al emailPrueba (siempre, igual que con Mailchimp).
+    const testEmail = emailPrueba || 'mdd145@gmail.com';
+    const testRes = await fetch(`${brevoBase}/emailCampaigns/${campaign.id}/sendTest`, {
+      method: 'POST', headers: brevoHeaders,
+      body: JSON.stringify({ emailTo: [testEmail] }),
+    });
+    const testOk = testRes.ok;
+    const testDetail = testOk ? null : await testRes.text().catch(() => null);
 
     return res.status(200).json({
       success: true,
+      canal: 'brevo',
       campaignId: campaign.id,
       campaignName: campaignTitle,
       scheduleTime,
       isDraft: modo === 'borrador',
       testEmail,
+      testSent: testOk,
+      ...(testDetail ? { testError: testDetail } : {}),
       productsFound: products.length,
-      webId: campaign.web_id,
-      mailchimpUrl: `https://mc.us1.mailchimp.com/campaigns/show?id=${campaign.web_id}`
+      brevoUrl: `https://app.brevo.com/camp/dashboard/email-listing/list/details/${campaign.id}`,
     });
 
   } catch (err) {
