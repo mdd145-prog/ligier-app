@@ -28,7 +28,7 @@
 
 export const config = { maxDuration: 30 };
 
-import { fetchTemplate, injectTransactional, getMagentoProduct } from '../lib/render.js';
+import { fetchTemplate, injectTransactional, getMagentoProduct, getProductsByCategory } from '../lib/render.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -49,6 +49,12 @@ export default async function handler(req, res) {
       ctaText,
       ctaUrl,
       skus = [],
+      // --- Selección variada por categoría + rango de precio ---
+      categoria,         // 'vinos' | 'vinos-guardados' | 'whisky' | ... (clave de CATEGORIAS)
+      priceMin,          // número (ARS) — opcional
+      priceMax,          // número (ARS) — opcional
+      productCount,      // cantidad total de productos (1..6); default según skus/categoria
+      excludeSkus,       // SKUs a excluir de la búsqueda por categoría
       modo = 'envio',
     } = req.body || {};
 
@@ -61,9 +67,38 @@ export default async function handler(req, res) {
     const finalPreheader = preheader || subject;
     const isGuardados = template === 'guardados';
 
-    // 1. Traer productos de Magento (en paralelo, máx 6 — el template soporta hasta 6).
-    const skusToFetch = (Array.isArray(skus) ? skus : []).filter(Boolean).slice(0, 6);
-    const products = (await Promise.all(skusToFetch.map(getMagentoProduct))).filter(Boolean);
+    // 1. Armado de productos. Tres modos posibles:
+    //   (a) skus manual            → traer esos exactos (uso de prueba o carrito fijo)
+    //   (b) categoria + rango      → N variados de la categoría en ese rango (Recompra T1, Bienvenida, Dormidos)
+    //   (c) skus + categoria       → el carrito arriba + (productCount - skus.length) variados (Recompra T2)
+    // Si no viene NI skus NI categoria → sin productos (NPS).
+    const skusManual = (Array.isArray(skus) ? skus : []).filter(Boolean).slice(0, 6);
+    const skusRequested = skusManual.length;
+    const totalCount = Math.min(productCount || (categoria ? 6 : skusRequested), 6);
+    let products = [];
+    let productsFromCategory = 0;
+
+    if (skusManual.length) {
+      const fromSkus = (await Promise.all(skusManual.map(getMagentoProduct))).filter(Boolean);
+      products = products.concat(fromSkus);
+    }
+
+    if (categoria && products.length < totalCount) {
+      const need = totalCount - products.length;
+      const allExclude = [
+        ...(Array.isArray(excludeSkus) ? excludeSkus : []),
+        ...skusManual,           // no duplicar lo del carrito
+        ...products.map(p => p.sku),
+      ];
+      const fromCat = await getProductsByCategory(categoria, {
+        count: need,
+        priceMin: priceMin != null ? Number(priceMin) : undefined,
+        priceMax: priceMax != null ? Number(priceMax) : undefined,
+        excludeSkus: allExclude,
+      });
+      products = products.concat(fromCat);
+      productsFromCategory = fromCat.length;
+    }
 
     // 2. Descargar template + inyectar
     const tpl = await fetchTemplate(template);
@@ -85,7 +120,10 @@ export default async function handler(req, res) {
         recipientEmail,
         subject,
         productsFound: products.length,
-        productsRequested: skusToFetch.length,
+        productsFromSkus: products.length - productsFromCategory,
+        productsFromCategory,
+        skusRequested,
+        skus: products.map(p => p.sku),
         htmlPreview: html.substring(0, 500) + '...',
         htmlLength: html.length,
       });
@@ -135,7 +173,10 @@ export default async function handler(req, res) {
       subject,
       messageId: brevoData.messageId,
       productsFound: products.length,
-      productsRequested: skusToFetch.length,
+      productsFromSkus: products.length - productsFromCategory,
+      productsFromCategory,
+      skusRequested,
+      skus: products.map(p => p.sku),
     });
 
   } catch (e) {
