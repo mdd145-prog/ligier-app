@@ -55,6 +55,8 @@ export default async function handler(req, res) {
       priceMax,          // número (ARS) — opcional
       productCount,      // cantidad total de productos (1..6); default según skus/categoria
       excludeSkus,       // SKUs a excluir de la búsqueda por categoría
+      withPromo,         // bool — mantener la banda 6x5 + precios rebajados (default: true si hay productos)
+      cartCtaUrl,        // si NO viene se arma con los SKUs cargados → CTA del hero y botón APROVECHAR van al carrito
       modo = 'envio',
     } = req.body || {};
 
@@ -100,16 +102,29 @@ export default async function handler(req, res) {
       productsFromCategory = fromCat.length;
     }
 
-    // 2. Descargar template + inyectar
+    // 2. Cart URL armado con los SKUs cargados (convención del wizard).
+    //    Se usa tanto para el CTA del hero como para el botón APROVECHAR del bloque PROMO.
+    const finalWithPromo = (withPromo != null) ? !!withPromo : (products.length > 0);
+    let finalCartUrl = cartCtaUrl;
+    if (!finalCartUrl && products.length) {
+      const cartJson = JSON.stringify(products.map(p => ({ sku: p.sku, qty: 1 })));
+      const cartB64 = Buffer.from(cartJson).toString('base64');
+      finalCartUrl = `https://vinotecaligier.com/compartircarrito/index/share/data/${cartB64}/`;
+    }
+    const finalCtaUrl = ctaUrl || finalCartUrl || 'https://vinotecaligier.com';
+
+    // 3. Descargar template + inyectar
     const tpl = await fetchTemplate(template);
     const html = injectTransactional(tpl, {
       eyebrow: finalEyebrow,
       titulo,
       bajada: bajada || '',
       products,
-      ctaText: ctaText || 'VER MI CARRITO',
-      ctaUrl: ctaUrl || 'https://vinotecaligier.com',
+      ctaText: ctaText || (finalCartUrl ? 'VER MI CARRITO' : 'VER SELECCIÓN'),
+      ctaUrl: finalCtaUrl,
       isGuardados,
+      withPromo: finalWithPromo,
+      cartUrl: finalCartUrl,
     });
 
     // 3. Modo dry: devolver HTML sin mandar
