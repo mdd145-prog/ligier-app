@@ -104,7 +104,16 @@ export default async function handler(req, res) {
 
     // 2. Cart URL armado con los SKUs cargados (convención del wizard).
     //    Se usa tanto para el CTA del hero como para el botón APROVECHAR del bloque PROMO.
-    const finalWithPromo = (withPromo != null) ? !!withPromo : (products.length > 0);
+    //
+    // Regla de oro: la promo 6×5 SOLO existe en `vinos`. Cualquier otra
+    // categoría (whisky, espirituosas, guardados, gift) NO la muestra.
+    // Si en el futuro hay promos por categoría, ampliar este set explícito.
+    // Memoria: feedback-promos-chequear-antes-de-ofrecer.
+    const CATEGORIAS_CON_6X5 = new Set(['vinos']);
+    const categoriaTiene6x5 = !categoria || CATEGORIAS_CON_6X5.has(categoria);
+    // withPromo explícito gana, pero NUNCA fuerza true si la categoría no tiene la promo.
+    const finalWithPromo = (withPromo === true && categoriaTiene6x5)
+      || (withPromo == null && products.length > 0 && categoriaTiene6x5);
     let finalCartUrl = cartCtaUrl;
     if (!finalCartUrl && products.length) {
       const cartJson = JSON.stringify(products.map(p => ({ sku: p.sku, qty: 1 })));
