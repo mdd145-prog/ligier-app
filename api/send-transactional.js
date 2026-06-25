@@ -95,12 +95,25 @@ export default async function handler(req, res) {
     const brevoKey = process.env.BREVO_API_KEY;
     if (!brevoKey) return res.status(500).json({ error: 'Falta BREVO_API_KEY en el entorno' });
 
+    // Brevo /smtp/email exige `name` no vacío en `to`. Fallback al fname o al
+    // local-part del email para que el envío nunca falle por eso.
+    const safeName = (recipientName && recipientName.trim())
+      || (finalFname && finalFname.trim())
+      || (recipientEmail ? recipientEmail.split('@')[0] : 'Cliente');
+
     const brevoBody = {
       sender: {
         name: process.env.BREVO_SENDER_NAME || 'Vinoteca Ligier',
         email: process.env.BREVO_SENDER_EMAIL || 'hola@news.vinotecaligier.com',
       },
-      to: [{ email: recipientEmail, name: recipientName || '' }],
+      // replyTo apunta a un email REAL que sí recibe. news.vinotecaligier.com
+      // es solo dominio de envío DKIM (sin MX), si el cliente le responde se
+      // bouncea. ventas@ligier.com.ar es el canal de respuesta del área.
+      replyTo: {
+        name: 'Vinoteca Ligier',
+        email: process.env.BREVO_REPLY_TO || 'ventas@ligier.com.ar',
+      },
+      to: [{ email: recipientEmail, name: safeName }],
       subject,
       htmlContent: html,
     };
