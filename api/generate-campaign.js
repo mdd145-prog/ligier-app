@@ -1,6 +1,6 @@
 export const config = { maxDuration: 60 };
 
-const GITHUB_RAW = 'https://raw.githubusercontent.com/mdd145-prog/Mailchimp/main/templates/';
+const GITHUB_RAW = 'https://raw.githubusercontent.com/mdd145-prog/Mailing/main/templates/';
 
 const TEMPLATES = {
   'vinos':           'base-email-vinos.html',
