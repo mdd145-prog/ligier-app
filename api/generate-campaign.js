@@ -664,7 +664,82 @@ export default async function handler(req, res) {
       });
     }
 
-    // 8b. Brevo (canal por defecto). Reemplaza Mailchimp desde el 25 jun 2026.
+    // 8b. Mailchimp (canal transitorio hasta dar de baja la cuenta). Mantenido
+    // como opción para no perder acceso a la audiencia legacy mientras dure la
+    // migración a Brevo. El día que se de baja Mailchimp, este bloque y sus
+    // env vars MAILCHIMP_* se eliminan.
+    if (canal === 'mailchimp') {
+      const mcKey = process.env.MAILCHIMP_API_KEY;
+      if (!mcKey) return res.status(500).json({ error: 'Falta MAILCHIMP_API_KEY en el entorno' });
+      const dc = mcKey.split('-').pop();
+      const audienceId = process.env.MAILCHIMP_AUDIENCE_ID;
+      if (!audienceId) return res.status(500).json({ error: 'Falta MAILCHIMP_AUDIENCE_ID en el entorno' });
+      const mcBase = `https://${dc}.api.mailchimp.com/3.0`;
+      const mcAuth = 'Basic ' + Buffer.from(`anystring:${mcKey}`).toString('base64');
+      const mcHeaders = { 'Authorization': mcAuth, 'Content-Type': 'application/json' };
+      const mcTitle = `Ligier · ${tipo} · ${dia} ${mes}`;
+
+      const createRes = await fetch(`${mcBase}/campaigns`, {
+        method: 'POST', headers: mcHeaders,
+        body: JSON.stringify({
+          type: 'regular',
+          recipients: { list_id: audienceId },
+          settings: { subject_line: subjectFinal, preview_text: preheaderFinal, from_name: 'Ligier', reply_to: 'ventas@ligier.com.ar', title: mcTitle }
+        })
+      });
+      const campaign = await createRes.json();
+      if (!campaign.id) return res.status(500).json({ error: 'Error Mailchimp crear campaña', detail: JSON.stringify(campaign) });
+
+      await fetch(`${mcBase}/campaigns/${campaign.id}/content`, {
+        method: 'PUT', headers: mcHeaders, body: JSON.stringify({ html: emailHtml })
+      });
+
+      const testEmail = emailPrueba || 'mdd145@gmail.com';
+      await fetch(`${mcBase}/campaigns/${campaign.id}/actions/test`, {
+        method: 'POST', headers: mcHeaders,
+        body: JSON.stringify({ test_emails: [testEmail], send_type: 'html' })
+      });
+
+      let mcScheduleTime = null;
+      if (modo !== 'borrador') {
+        let sendDate;
+        if (fecha) {
+          const [y, mo, d] = fecha.split('-').map(Number);
+          sendDate = new Date(y, mo - 1, d);
+        } else {
+          const diasMap = { Lunes:1, Martes:2, Miércoles:3, Jueves:4, Viernes:5, Sábado:6, Domingo:0 };
+          const today = new Date();
+          const targetDay = diasMap[dia] ?? 3;
+          let daysUntil = (targetDay - today.getDay() + 7) % 7 || 7;
+          sendDate = new Date(today);
+          sendDate.setDate(today.getDate() + daysUntil);
+        }
+        const [h, m] = (hora || '10:30').split(':');
+        const utcDate = new Date(Date.UTC(
+          sendDate.getFullYear(), sendDate.getMonth(), sendDate.getDate(),
+          parseInt(h) + 3, parseInt(m), 0, 0
+        ));
+        mcScheduleTime = utcDate.toISOString().replace('.000Z', '+00:00');
+        await fetch(`${mcBase}/campaigns/${campaign.id}/actions/schedule`, {
+          method: 'POST', headers: mcHeaders, body: JSON.stringify({ schedule_time: mcScheduleTime })
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        canal: 'mailchimp',
+        campaignId: campaign.id,
+        campaignName: mcTitle,
+        scheduleTime: mcScheduleTime,
+        isDraft: modo === 'borrador',
+        testEmail,
+        productsFound: products.length,
+        webId: campaign.web_id,
+        mailchimpUrl: `https://mc.us1.mailchimp.com/campaigns/show?id=${campaign.web_id}`
+      });
+    }
+
+    // 8c. Brevo (canal por defecto). Sender principal desde el 25 jun 2026.
     // Brevo expone /v3/emailCampaigns para crear (incluyendo programación) en
     // una sola llamada, y /v3/emailCampaigns/{id}/sendTest para el preview.
     const brevoKey = process.env.BREVO_API_KEY;
