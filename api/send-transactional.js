@@ -81,7 +81,12 @@ export default async function handler(req, res) {
     let productsFromCategory = 0;
 
     if (skusManual.length) {
-      const fromSkus = (await Promise.all(skusManual.map(getMagentoProduct))).filter(Boolean);
+      // Los SKUs manuales (caso "carrito de Fernando" en Recompra T2) también
+      // tienen que estar en stock — si no, no se incluyen (regla: nunca ofrecer
+      // un producto sin stock). Si faltan, los rellena la categoría abajo.
+      const fromSkus = (await Promise.all(skusManual.map(getMagentoProduct)))
+        .filter(Boolean)
+        .filter(p => p.inStock && p.qty > 0);
       products = products.concat(fromSkus);
     }
 
