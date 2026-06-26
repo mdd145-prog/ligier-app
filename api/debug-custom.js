@@ -41,8 +41,15 @@ export default async function handler(req, res) {
 
   try {
     const t0 = Date.now();
+    // OJO: el header real es X-API-KEY (la spec borrador decía X-LGR-Key pero
+    // Magento lo nombró X-API-KEY) Y el UA NO puede ser de navegador (dispara
+    // el WAF de Nexcess → 403 HTML). UA neutro tipo "LGR-Mailer/1.0" pasa.
     const r = await fetch(url, {
-      headers: { 'X-LGR-Key': CUSTOM_KEY, 'Accept': 'application/json' },
+      headers: {
+        'X-API-KEY': CUSTOM_KEY,
+        'Accept': 'application/json',
+        'User-Agent': 'LGR-Mailer/1.0 (Vercel)',
+      },
     });
     const ms = Date.now() - t0;
     const text = await r.text();
