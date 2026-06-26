@@ -54,7 +54,7 @@ async function mgFetch(url, ms = 12000) {
 }
 
 // ── copys ────────────────────────────────────────────────────────────────
-async function sugerirCopys({ campo, tipo, contexto }) {
+async function sugerirCopys({ campo, tipo, cantidad, contexto }) {
   const schema = {
     type: 'object',
     properties: {
@@ -68,6 +68,10 @@ async function sugerirCopys({ campo, tipo, contexto }) {
     additionalProperties: false,
   };
 
+  const cantidadLine = cantidad
+    ? `La campaña ofrece ${cantidad} ${cantidad === 1 ? 'botella' : 'botellas'} — el ${campo} tiene que ser coherente con esa cantidad (singular/plural, sin mencionar números que no apliquen).`
+    : '';
+
   const response = await anthropic.messages.create({
     model: 'claude-opus-4-8',
     max_tokens: 1500,
@@ -77,6 +81,7 @@ async function sugerirCopys({ campo, tipo, contexto }) {
       content: `${VOZ_LIGIER}
 
 Generá 5 opciones NUEVAS de ${campo} para un email de tipo "${tipo}" de Vinoteca Ligier.
+${cantidadLine}
 ${contexto ? `Contexto de la campaña: ${contexto}` : ''}
 Tienen que sonar a la misma voz pero ser frescas (no clichés de vinoteca).`,
     }],

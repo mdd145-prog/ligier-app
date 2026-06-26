@@ -9,11 +9,18 @@ const TIPOS = [
   { id: "wine-club", label: "Wine Club", icon: "♣" },
   { id: "experiencias", label: "Experiencias", icon: "✨" },
   { id: "gift-cards", label: "Gift Cards", icon: "🎁" },
+  { id: "banner", label: "Banner", icon: "🖼️" },
 ];
 
-const RANGOS = ["20-30k", "30-40k", "40-60k", "60-90k", "90-120k", "+120k"];
+// Pasos que se saltean cuando tipo=banner (no aplica accesorio ni promo)
+const BANNER_SKIP_STEPS = [2, 4];
 
 const STEPS = ["Tipo", "Productos", "Accesorio", "Título", "Promos", "Fecha", "Canal", "Opciones", "Vista previa"];
+
+function todayLocal() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 const PROGRESS_STEPS = [
   "Cargando template...",
@@ -36,9 +43,6 @@ export default function App() {
   // v2
   const [extra, setExtra] = useState({ titulo: [], bajada: [], subject: [], preheader: [] }); // sugerencias IA
   const [sugiriendo, setSugiriendo] = useState("");
-  const [claudeProds, setClaudeProds] = useState(null); // {productos, criterio}
-  const [claudeSel, setClaudeSel] = useState(new Set());
-  const [buscandoProds, setBuscandoProds] = useState(false);
   const [promos, setPromos] = useState(null);
   const [listasLgr, setListasLgr] = useState(null);
   const [preview, setPreview] = useState(null); // {html, subject, preheader, cartTotal, productsFound}
@@ -46,12 +50,13 @@ export default function App() {
 
   function initialForm() {
     return {
-      tipo: "", rango: "", cantidad: 6, seleccion: "carrito", carrito: "", urls: "",
-      accesorio: "auto", accesorioUrl: "",
+      tipo: "", cantidad: 6, seleccion: "carrito", carrito: "", urls: "",
+      accesorio: "ninguno", accesorioUrl: "",
+      bannerImageUrl: "", bannerCtaText: "VER MÁS", bannerCtaUrl: "",
       titulo: "", tituloCustom: false, bajada: "",
       subject: "", preheader: "",
       tienePromo: true,
-      fecha: "", hora: "10:30",
+      fecha: todayLocal(), hora: "17:30",
       canal: "brevo", lista_id: "",
       modo: "programar",
       emailPrueba: "dayanmartin@gmail.com",
@@ -60,6 +65,22 @@ export default function App() {
   }
 
   const update = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  // Navegación con skip automático de pasos que no aplican según tipo
+  const nextStep = () => {
+    let next = step + 1;
+    if (form.tipo === 'banner') {
+      while (BANNER_SKIP_STEPS.includes(next)) next++;
+    }
+    setStep(next);
+  };
+  const prevStep = () => {
+    let prev = step - 1;
+    if (form.tipo === 'banner') {
+      while (BANNER_SKIP_STEPS.includes(prev)) prev--;
+    }
+    setStep(prev);
+  };
   const selectedTipo = TIPOS.find(t => t.id === form.tipo);
   const titulosDisponibles = form.tipo ? [...(extra.titulo), ...(TITULOS[form.tipo] || [])] : [];
   const titulosFiltrados = tituloSearch
@@ -72,12 +93,12 @@ export default function App() {
   const canNext = () => {
     if (step === 0) return form.tipo !== "";
     if (step === 1) {
+      if (form.tipo === 'banner') return form.bannerImageUrl.trim() !== '' && form.bannerCtaText.trim() !== '' && form.bannerCtaUrl.trim() !== '';
       if (form.seleccion === "carrito") return form.carrito !== "";
       if (form.seleccion === "urls") return form.urls.trim() !== "";
-      if (form.seleccion === "claude") return claudeSel.size > 0;
       return false;
     }
-    if (step === 2) return form.accesorio === "ninguno" || form.accesorio === "auto" || (form.accesorio === "manual" && form.accesorioUrl !== "");
+    if (step === 2) return form.accesorio === "ninguno" || (form.accesorio === "manual" && form.accesorioUrl !== "");
     if (step === 3) return form.titulo !== "";
     if (step === 4) return true;
     if (step === 5) return form.fecha !== "" && form.hora !== "";
@@ -92,37 +113,12 @@ export default function App() {
     try {
       const res = await fetch("/api/assist", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accion: "copys", campo, tipo: form.tipo, contexto: form.notas || undefined }),
+        body: JSON.stringify({ accion: "copys", campo, tipo: form.tipo, cantidad: form.cantidad, contexto: form.notas || undefined }),
       });
       const data = await res.json();
       if (data.sugerencias) setExtra(e => ({ ...e, [campo]: [...data.sugerencias, ...e[campo]] }));
     } catch (e) { /* silencioso */ }
     setSugiriendo("");
-  };
-
-  // ── IA: elegir productos ──
-  const buscarConClaude = async () => {
-    setBuscandoProds(true); setError(null);
-    // Si ya hay una tanda, los TILDADOS se mantienen y Claude completa los lugares vacíos
-    const mantener = claudeProds
-      ? claudeProds.productos.filter(p => claudeSel.has(p.sku)).map(p => ({ sku: p.sku, name: p.name }))
-      : [];
-    try {
-      const res = await fetch("/api/assist", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accion: "productos", tipo: form.tipo, rango: form.rango, notas: form.notas, cantidad: form.cantidad, mantener }),
-      });
-      const data = await res.json();
-      if (data.error) { setError(data.error); }
-      else {
-        const mantenidos = claudeProds ? claudeProds.productos.filter(p => claudeSel.has(p.sku)) : [];
-        const nuevos = (data.productos || []).filter(p => !mantenidos.some(m => m.sku === p.sku));
-        const productos = [...mantenidos, ...nuevos];
-        setClaudeProds({ ...data, productos });
-        setClaudeSel(new Set(productos.map(p => p.sku)));
-      }
-    } catch (e) { setError(e.message); }
-    setBuscandoProds(false);
   };
 
   // ── Canal: cargar listas LGR ──
@@ -145,14 +141,7 @@ export default function App() {
     }
   }, [step]);
 
-  const buildPayload = (dryRun) => {
-    const payload = { ...form, dryRun };
-    if (form.seleccion === "claude" && claudeProds) {
-      payload.seleccion = "urls";
-      payload.urls = claudeProds.productos.filter(p => claudeSel.has(p.sku)).map(p => p.url).join("\n");
-    }
-    return payload;
-  };
+  const buildPayload = (dryRun) => ({ ...form, dryRun });
 
   // ── Paso final: generar vista previa (dryRun) ──
   const generarPreview = async () => {
@@ -348,14 +337,30 @@ export default function App() {
           </div>
         </>}
 
-        {/* STEP 1 — Productos */}
-        {step === 1 && <>
+        {/* STEP 1 — Banner (cuando tipo=banner) */}
+        {step === 1 && form.tipo === 'banner' && <>
+          <h2 style={s.stepTitle}>Banner del email</h2>
+          <label style={s.label}>URL de la imagen</label>
+          <input style={s.input} type="url" placeholder="https://i.imgur.com/abc.jpg" value={form.bannerImageUrl} onChange={e => update('bannerImageUrl', e.target.value)} />
+          <p style={{ fontSize: 11, color: '#888', marginTop: -8, marginBottom: 16 }}>Subí la imagen a Mailchimp / Imgur / Drive público y pegá la URL acá. Ancho recomendado: 600px.</p>
+          {form.bannerImageUrl && (
+            <div style={{ marginBottom: 16, padding: 8, background: '#f4f1ec', borderRadius: 2 }}>
+              <img src={form.bannerImageUrl} alt="Preview" style={{ width: '100%', maxHeight: 200, objectFit: 'contain', display: 'block' }} onError={e => e.target.style.display = 'none'} />
+            </div>
+          )}
+          <label style={s.label}>Texto del botón (CTA)</label>
+          <input style={s.input} placeholder="VER MÁS" value={form.bannerCtaText} onChange={e => update('bannerCtaText', e.target.value)} />
+          <label style={s.label}>URL a la que lleva el botón</label>
+          <input style={s.input} type="url" placeholder="https://vinotecaligier.com/..." value={form.bannerCtaUrl} onChange={e => update('bannerCtaUrl', e.target.value)} />
+        </>}
+
+        {/* STEP 1 — Productos (resto de tipos) */}
+        {step === 1 && form.tipo !== 'banner' && <>
           <h2 style={s.stepTitle}>¿Cómo elegimos los productos?</h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
             {[
               { id: "carrito", label: "Link del carrito", sub: "Generaste el carrito en el sitio" },
               { id: "urls", label: "URLs de productos", sub: "Pegás los links uno por uno" },
-              { id: "claude", label: "✨ Claude elige", sub: "Le das rango de precio y notas; arma la selección" },
             ].map(m => (
               <button key={m.id} style={{ ...s.modeBtn, background: form.seleccion === m.id ? '#111' : '#fff', color: form.seleccion === m.id ? '#fff' : '#111', border: `2px solid ${form.seleccion === m.id ? '#111' : '#e8e8e8'}` }} onClick={() => update('seleccion', m.id)}>
                 <span style={{ fontSize: 14, fontWeight: 700, display: 'block', marginBottom: 2 }}>{m.label}</span>
@@ -371,41 +376,6 @@ export default function App() {
             <label style={s.label}>URLs (una por línea)</label>
             <textarea style={s.textarea} placeholder={"https://vinotecaligier.com/producto-1.html\n..."} value={form.urls} onChange={e => update('urls', e.target.value)} rows={7} />
           </>}
-          {form.seleccion === 'claude' && <>
-            <label style={s.label}>¿Cuántas botellas? *</label>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6, marginBottom: 16 }}>
-              {[3, 4, 6, 8, 10, 12].map(n => (
-                <button key={n} style={{ ...s.rangoBtn, background: form.cantidad === n ? '#111' : '#fff', color: form.cantidad === n ? '#fff' : '#111', border: `2px solid ${form.cantidad === n ? '#111' : '#e8e8e8'}` }} onClick={() => update('cantidad', n)}>{n}</button>
-              ))}
-            </div>
-            <label style={s.label}>Rango de precio *</label>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
-              {RANGOS.map(r => (
-                <button key={r} style={{ ...s.rangoBtn, background: form.rango === r ? '#111' : '#fff', color: form.rango === r ? '#fff' : '#111', border: `2px solid ${form.rango === r ? '#111' : '#e8e8e8'}` }} onClick={() => update('rango', r)}>${r}</button>
-              ))}
-            </div>
-            <label style={s.label}>Notas (cepas, bodegas, marcas — opcional)</label>
-            <textarea style={s.textarea} placeholder="Ej: malbecs de Altamira, sumá un cabernet franc, nada de Catena..." value={form.notas} onChange={e => update('notas', e.target.value)} rows={3} />
-            <button style={{ ...s.nextBtn, width: '100%', marginTop: 12, opacity: form.rango && !buscandoProds ? 1 : 0.4 }} disabled={!form.rango || buscandoProds} onClick={buscarConClaude}>
-              {buscandoProds ? 'Buscando en el catálogo…' : claudeProds ? `↻ Completar la tanda (mantiene ${claudeSel.size} tildados)` : '✨ Buscar con Claude'}
-            </button>
-            {claudeProds?.criterio && <p style={{ fontSize: 12, color: '#888', marginTop: 12, fontStyle: 'italic' }}>“{claudeProds.criterio}”</p>}
-            {claudeProds?.productos?.length > 0 && (
-              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {claudeProds.productos.map(p => {
-                  const on = claudeSel.has(p.sku);
-                  return (
-                    <button key={p.sku} style={{ ...s.modeBtn, border: `2px solid ${on ? '#111' : '#e8e8e8'}`, background: '#fff', color: '#111', opacity: on ? 1 : 0.45 }}
-                      onClick={() => setClaudeSel(prev => { const n = new Set(prev); n.has(p.sku) ? n.delete(p.sku) : n.add(p.sku); return n; })}>
-                      <span style={{ fontSize: 13, fontWeight: 700, display: 'block' }}>{on ? '✓ ' : ''}{p.name} — ${Number(p.price).toLocaleString('es-AR')}</span>
-                      <span style={{ fontSize: 11, opacity: 0.7 }}>{p.motivo}</span>
-                    </button>
-                  );
-                })}
-                <p style={{ fontSize: 11, color: '#aaa' }}>Tocá para destildar lo que no te convence y apretá "↻ Completar la tanda": los tildados se quedan, Claude repone el resto. Van {claudeSel.size} de {form.cantidad}.</p>
-              </div>
-            )}
-          </>}
         </>}
 
         {/* STEP 2 — Accesorio */}
@@ -413,7 +383,6 @@ export default function App() {
           <h2 style={s.stepTitle}>Artículo complementario</h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
             {[
-              { id: "auto", label: "✨ Claude elige", sub: "Busca en el catálogo el accesorio más afín a los productos" },
               { id: "manual", label: "Yo elijo el accesorio", sub: "Pegás la URL del producto" },
               { id: "ninguno", label: "Sin accesorio", sub: "El email va sin sección complementaria" },
             ].map(m => (
@@ -432,6 +401,13 @@ export default function App() {
         {/* STEP 3 — Título / bajada / subject / preheader, todos con "sugerir nuevos" */}
         {step === 3 && <>
           <h2 style={s.stepTitle}>Título del email</h2>
+          <label style={s.label}>¿Cuántas botellas vas a ofrecer?</label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginBottom: 8 }}>
+            {[1, 2, 3, 6].map(n => (
+              <button key={n} style={{ ...s.rangoBtn, background: form.cantidad === n ? '#111' : '#fff', color: form.cantidad === n ? '#fff' : '#111', border: `2px solid ${form.cantidad === n ? '#111' : '#e8e8e8'}` }} onClick={() => update('cantidad', n)}>{n}</button>
+            ))}
+          </div>
+          <p style={{ fontSize: 11, color: '#888', marginBottom: 16 }}>El botón ✨ sugiere títulos pensados para {form.cantidad} {form.cantidad === 1 ? 'botella' : 'botellas'}.</p>
           <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
             <input style={{ ...s.input, marginBottom: 0, flex: 1 }} placeholder="Buscar título..." value={tituloSearch} onChange={e => setTituloSearch(e.target.value)} />
             <button style={s.sugerirBtn} disabled={sugiriendo === 'titulo'} onClick={() => sugerir('titulo')}>{sugiriendo === 'titulo' ? '…' : '✨ Sugerir nuevos'}</button>
@@ -620,9 +596,9 @@ export default function App() {
 
       {/* Nav */}
       <div style={s.nav}>
-        <button style={s.backBtn} onClick={() => { if (step === 0) { setView('home'); } else { setError(null); if (step === 8) setPreview(null); setStep(s2 => s2 - 1); } }}>← Volver</button>
+        <button style={s.backBtn} onClick={() => { if (step === 0) { setView('home'); } else { setError(null); if (step === 8) setPreview(null); prevStep(); } }}>← Volver</button>
         {step < STEPS.length - 1 && (
-          <button style={{ ...s.nextBtn, opacity: canNext() ? 1 : 0.4 }} disabled={!canNext()} onClick={() => setStep(s2 => s2 + 1)}>
+          <button style={{ ...s.nextBtn, opacity: canNext() ? 1 : 0.4 }} disabled={!canNext()} onClick={nextStep}>
             {step === STEPS.length - 2 ? 'Generar vista previa →' : 'Continuar →'}
           </button>
         )}

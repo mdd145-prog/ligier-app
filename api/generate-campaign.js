@@ -10,6 +10,7 @@ const TEMPLATES = {
   'wine-club':       'base-email-vinos.html',
   'experiencias':    'base-email-vinos.html',
   'gift-cards':      'base-email-vinos.html',
+  'banner':          'base-email-banner.html',
 };
 
 // Wine club membership url_keys for Magento lookup
@@ -274,6 +275,48 @@ function removeBetweenInclusive(html, startMarker, endMarker) {
   return { result, found: true };
 }
 
+// Inyección para tipo=banner: sin productos, sin promo, sin accesorio.
+// Solo imagen full-width + bloque CTA con título/bajada/botón.
+function injectBanner(template, opts) {
+  const { titulo, bajada, preheader, bannerImageUrl, bannerCtaText, bannerCtaUrl } = opts;
+  const escapeAttr = (s) => String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  let result = template;
+
+  // 1. Preheader
+  if (preheader) {
+    result = result.replace(/(<div class="preheader"[^>]*>)[\s\S]*?(<\/div>)/, (m, p1, p2) => p1 + preheader + p2);
+  }
+
+  // 2. Banner: <tr> con imagen full-width linkeada al CTA
+  const bannerBlock = `
+  <tr>
+    <td style="background:#ffffff; padding:0; font-size:0; line-height:0;">
+      <a href="${escapeAttr(bannerCtaUrl)}" target="_blank">
+        <img class="banner-img" src="${escapeAttr(bannerImageUrl)}" alt="Banner" width="600" style="width:600px; max-width:600px; height:auto; display:block; margin:0 auto;">
+      </a>
+    </td>
+  </tr>
+  `;
+  const b = replaceBetween(result, '<!-- INJECT:BANNER_START -->', '<!-- INJECT:BANNER_END -->', bannerBlock);
+  if (b.found) result = b.result;
+
+  // 3. CTA: título + bajada + botón
+  const titleHtml = (titulo || '').replace(/\n/g, '<br>');
+  const ctaBlock = `
+  <tr>
+    <td class="cta-pad" style="background:#ffffff; padding:48px 40px 44px; text-align:center;">
+      ${titleHtml ? `<h1 class="cta-h1" style="font-size:30px; font-weight:700; letter-spacing:-1px; color:#111; margin:0 0 16px 0; line-height:1.2;">${titleHtml}</h1>` : ''}
+      ${bajada ? `<p class="cta-bajada" style="font-size:15px; color:#666; line-height:1.6; margin:0 0 28px 0;">${bajada}</p>` : ''}
+      <a href="${escapeAttr(bannerCtaUrl)}" target="_blank" style="display:inline-block; background:#111111; color:#ffffff; font-size:11px; font-weight:700; letter-spacing:2px; text-transform:uppercase; padding:15px 36px;">${escapeAttr(bannerCtaText)}</a>
+    </td>
+  </tr>
+  `;
+  const c = replaceBetween(result, '<!-- INJECT:CTA_START -->', '<!-- INJECT:CTA_END -->', ctaBlock);
+  if (c.found) result = c.result;
+
+  return result;
+}
+
 function injectIntoTemplate(template, opts) {
   const { products, accessory, cartLink, cartTotal, tipo, mes, titulo, qualifies6x5 } = opts;
   let result = template;
@@ -458,7 +501,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { tipo, seleccion, carrito, urls, dia, fecha, hora, titulo, bajada, subject, preheader, accesorio, accesorioUrl, modo, emailPrueba, canal, lista_id } = req.body;
+  const { tipo, seleccion, carrito, urls, dia, fecha, hora, titulo, bajada, subject, preheader, accesorio, accesorioUrl, modo, emailPrueba, canal, lista_id, bannerImageUrl, bannerCtaText, bannerCtaUrl } = req.body;
   const mes = new Date().toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
 
   // Default bajada per type (used if user doesn't provide one)
@@ -500,6 +543,23 @@ export default async function handler(req, res) {
     if (!templateRes.ok) throw new Error('No se pudo cargar el template');
     let baseTemplate = await templateRes.text();
 
+    // Vars compartidas entre rama banner y rama productos
+    let emailHtml;
+    let cartTotal = null;
+    let products = [];
+
+    // BANNER: short-path. Sin productos, sin promo, sin accesorio, sin pack.
+    if (tipo === 'banner') {
+      if (!bannerImageUrl || !bannerCtaText || !bannerCtaUrl) {
+        return res.status(400).json({ error: 'Banner requiere bannerImageUrl, bannerCtaText y bannerCtaUrl' });
+      }
+      emailHtml = injectBanner(baseTemplate, {
+        titulo, bajada: bajadaFinal, preheader: preheaderFinal,
+        bannerImageUrl, bannerCtaText, bannerCtaUrl,
+      });
+    }
+
+    if (tipo !== 'banner') {
     // 2. Get SKUs
     let skuList = [];
     let cartLink = carrito?.trim();
@@ -523,8 +583,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // 3. Get products from Magento
-    let products = [];
+    // 3. Get products from Magento (products ya está declarado arriba como let)
     if (typeof directProducts !== 'undefined') {
       products = directProducts;
     } else if (skuList.length > 0) {
@@ -581,7 +640,6 @@ export default async function handler(req, res) {
 
     // Total del pack: SIEMPRE leído del carrito real de Magento (B1.1).
     //    Si la campaña califica pero no se puede leer el total → 502, sin fallback.
-    let cartTotal = null;
     if (qualifies6x5) {
       if (!cartLink) {
         return res.status(502).json({ error: 'No se pudo leer el total del carrito de Magento' });
@@ -602,7 +660,9 @@ export default async function handler(req, res) {
     }
 
     // 7. Inject everything
-    const emailHtml = injectIntoTemplate(baseTemplate, { products, accessory, cartLink, cartTotal, tipo, mes, titulo, bajada: bajadaFinal, preheader: preheaderFinal, qualifies6x5 });
+    emailHtml = injectIntoTemplate(baseTemplate, { products, accessory, cartLink, cartTotal, tipo, mes, titulo, bajada: bajadaFinal, preheader: preheaderFinal, qualifies6x5 });
+    } // fin del if (tipo !== 'banner')
+
     if (!emailHtml.includes('<!DOCTYPE')) {
       return res.status(500).json({ error: 'Error generando el email' });
     }
