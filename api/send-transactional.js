@@ -28,7 +28,7 @@
 
 export const config = { maxDuration: 30 };
 
-import { fetchTemplate, injectTransactional, getProductsByCategory, getProductsBySkus, getCartGrandTotal } from '../lib/render.js';
+import { fetchTemplate, injectTransactional, getProductsByCategory, getProductsBySkus, getCartGrandTotal, getActivePromos } from '../lib/render.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -115,20 +115,33 @@ export default async function handler(req, res) {
     }
     const finalCtaUrl = ctaUrl || finalCartUrl || 'https://vinotecaligier.com';
 
-    // 2.b. ¿HAY promo? Decisión EXPLÍCITA del caller (workflow/JSON).
-    //
-    // Aprendizaje 25 jun 2026: el `grand_total` del cart de Magento NO basta
-    // para deducir "promo activa". Aunque las reglas de promo estén OFF, el
-    // grand_total puede mostrar diferencias por `special_price` por SKU, lista
-    // de precios mayorista que la sesión agarra, tiers por cantidad, etc.
-    // Comunicar eso como "promo" al cliente es falso.
-    //
-    // Por lo tanto: NO inferimos promo. El caller (n8n / wizard) debe pasar
-    // `withPromo: true` solo cuando sabe que hay una promo real comunicable
-    // para la combinación de productos. Default: sin promo.
-    // Memoria: feedback-promos-chequear-antes-de-ofrecer.
+    // 2.b. ¿HAY promo? Validación con DOS fuentes complementarias:
+    //   (1) api_promos.php?activas=true → confirma que existe alguna regla
+    //       vigente en Magento. Si NO hay → cero promo, fin.
+    //   (2) getCartGrandTotal → arma el cart real con los SKUs y mira si el
+    //       grand_total bajó vs la suma de precios. Si bajó → la regla activa
+    //       SE APLICA a esta combinación específica de productos.
+    // Solo si AMBAS dan true se prende `withPromo`. Esto evita los dos errores
+    // históricos: (a) prender promo sin que haya regla activa; (b) tener
+    // regla activa pero asumir que aplica a SKUs/categorías donde no.
+    // El caller puede forzar OFF con withPromo:false; no puede forzar ON.
+    // Memoria: regla-de-oro-corroborar-promo-y-stock.
     const sumaPrecioLleno = products.reduce((acc, p) => acc + (parseFloat(p.price) || 0), 0);
-    const finalWithPromo = (withPromo === true);
+    let promosActivas = [];
+    let magentoGrandTotal = null;
+    let promoAplicaAlCart = false;
+    if (products.length && withPromo !== false) {
+      promosActivas = await getActivePromos();
+      if (promosActivas.length && finalCartUrl) {
+        magentoGrandTotal = await getCartGrandTotal(finalCartUrl);
+        const tolerancia = 100; // ARS — redondeo / centavos
+        promoAplicaAlCart = magentoGrandTotal != null
+          && magentoGrandTotal < (sumaPrecioLleno - tolerancia);
+      }
+    }
+    const finalWithPromo = (withPromo === false)
+      ? false
+      : (promosActivas.length > 0 && promoAplicaAlCart);
 
     // 3. Descargar template + inyectar
     const tpl = await fetchTemplate(template);
@@ -157,6 +170,10 @@ export default async function handler(req, res) {
         skusRequested,
         skus: products.map(p => p.sku),
         sumaPrecioLleno,
+        magentoGrandTotal,
+        promosActivasCount: promosActivas.length,
+        promosActivasNames: promosActivas.map(p => p.name),
+        promoAplicaAlCart,
         finalWithPromo,
         htmlPreview: html.substring(0, 500) + '...',
         htmlLength: html.length,
@@ -212,6 +229,10 @@ export default async function handler(req, res) {
       skusRequested,
       skus: products.map(p => p.sku),
       sumaPrecioLleno,
+      magentoGrandTotal,
+      promosActivasCount: promosActivas.length,
+      promosActivasNames: promosActivas.map(p => p.name),
+      promoAplicaAlCart,
       finalWithPromo,
     });
 
