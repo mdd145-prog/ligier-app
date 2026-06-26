@@ -1,0 +1,7 @@
+{
+  "_doc": "Declara qué skills compartidas consume este repo desde mdd145-prog/LIGIER. Sincronizar con: ./scripts/sync-skills.sh",
+  "upstream": "mdd145-prog/LIGIER",
+  "skills": [
+    { "area": "marketing", "skill": "lgr-armado-mailing" }
+  ]
+}

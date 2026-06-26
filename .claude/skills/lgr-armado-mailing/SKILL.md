@@ -1,9 +1,15 @@
+<!--
+  AUTO-GENERADO POR scripts/sync-skills.sh — NO EDITAR ACÁ.
+  Fuente de verdad: mdd145-prog/LIGIER/marketing/lgr-armado-mailing/SKILL.md
+  Para cambios: editar en LIGIER, hacer push, volver acá y re-correr el sync.
+-->
+
 ---
-name: seleccion-productos-mailing
-description: Reglas para seleccionar productos y mostrar promos en emails/banners de Vinoteca Ligier. Usar CADA VEZ que se construya una pieza de marketing que muestre productos (Recompra, Bienvenida, Dormidos, NPS, banners, automations). Cubre stock, presentación, promos, qué endpoints usar y qué no asumir.
+name: lgr-armado-mailing
+description: Reglas duras para ARMAR piezas de mailing de Vinoteca Ligier (Recompra, Bienvenida, Dormidos, NPS, banners, automations). Usar CADA VEZ que una pieza de email muestre productos o promos. Cubre stock, presentación 750ml, promos validadas con cart real, qué endpoints custom de Magento usar y qué nunca asumir.
 ---
 
-# Selección de productos para mailing — reglas duras
+# Armado de piezas de mailing Ligier — reglas duras
 
 > v1 — 26 jun 2026. Capturado durante el armado del endpoint `send-transactional`
 > de Vercel (`ligier-app`) que arma piezas con productos reales para el flujo
