@@ -28,7 +28,7 @@
 
 export const config = { maxDuration: 30 };
 
-import { fetchTemplate, injectTransactional, getMagentoProduct, getProductsByCategory, getCartGrandTotal } from '../lib/render.js';
+import { fetchTemplate, injectTransactional, getProductsByCategory, getProductsBySkus, getCartGrandTotal } from '../lib/render.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -84,9 +84,7 @@ export default async function handler(req, res) {
       // Los SKUs manuales (caso "carrito de Fernando" en Recompra T2) también
       // tienen que estar en stock — si no, no se incluyen (regla: nunca ofrecer
       // un producto sin stock). Si faltan, los rellena la categoría abajo.
-      const fromSkus = (await Promise.all(skusManual.map(getMagentoProduct)))
-        .filter(Boolean)
-        .filter(p => p.inStock && p.qty > 0);
+      const fromSkus = await getProductsBySkus(skusManual);
       products = products.concat(fromSkus);
     }
 
