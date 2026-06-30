@@ -12,8 +12,14 @@ const TIPOS = [
   { id: "banner", label: "Banner", icon: "🖼️" },
 ];
 
-// Pasos que se saltean cuando tipo=banner (no aplica accesorio ni promo)
-const BANNER_SKIP_STEPS = [2, 4];
+// Pasos que se saltean según el tipo:
+// - banner: no aplica accesorio (2) ni promo (4)
+// - todo lo que NO es vinos: la promo 6×5 solo existe en vinos → saltar (4)
+function getSkipSteps(tipo) {
+  if (tipo === 'banner') return [2, 4];
+  if (tipo && tipo !== 'vinos') return [4];
+  return [];
+}
 
 const STEPS = ["Tipo", "Productos", "Accesorio", "Título", "Promos", "Fecha", "Canal", "Opciones", "Vista previa"];
 
@@ -69,17 +75,15 @@ export default function App() {
 
   // Navegación con skip automático de pasos que no aplican según tipo
   const nextStep = () => {
+    const skips = getSkipSteps(form.tipo);
     let next = step + 1;
-    if (form.tipo === 'banner') {
-      while (BANNER_SKIP_STEPS.includes(next)) next++;
-    }
+    while (skips.includes(next)) next++;
     setStep(next);
   };
   const prevStep = () => {
+    const skips = getSkipSteps(form.tipo);
     let prev = step - 1;
-    if (form.tipo === 'banner') {
-      while (BANNER_SKIP_STEPS.includes(prev)) prev--;
-    }
+    while (skips.includes(prev)) prev--;
     setStep(prev);
   };
   const selectedTipo = TIPOS.find(t => t.id === form.tipo);
@@ -114,7 +118,7 @@ export default function App() {
     try {
       const res = await fetch("/api/assist", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accion: "copys", campo, tipo: form.tipo, cantidad: form.cantidad, contexto: form.notas || undefined }),
+        body: JSON.stringify({ accion: "copys", campo, tipo: form.tipo, cantidad: form.tipo === 'vinos' ? form.cantidad : undefined, contexto: form.notas || undefined }),
       });
       const data = await res.json();
       if (data.sugerencias) setExtra(e => ({ ...e, [campo]: [...data.sugerencias, ...e[campo]] }));
@@ -386,13 +390,15 @@ export default function App() {
         {/* STEP 3 — Título / bajada / subject / preheader, todos con "sugerir nuevos" */}
         {step === 3 && <>
           <h2 style={s.stepTitle}>Título del email</h2>
-          <label style={s.label}>¿Cuántas botellas mencionar en el título?</label>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginBottom: 8 }}>
-            {[1, 2, 3, 6].map(n => (
-              <button key={n} style={{ ...s.rangoBtn, background: form.cantidad === n ? '#111' : '#fff', color: form.cantidad === n ? '#fff' : '#111', border: `2px solid ${form.cantidad === n ? '#111' : '#e8e8e8'}` }} onClick={() => update('cantidad', n)}>{n}</button>
-            ))}
-          </div>
-          <p style={{ fontSize: 11, color: '#888', marginBottom: 16 }}>Solo afecta los <strong>títulos sugeridos</strong> (singular/plural coherente). La promo 6×5 y los productos los toma del carrito real.</p>
+          {form.tipo === 'vinos' && <>
+            <label style={s.label}>¿Cuántas botellas mencionar en el título?</label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginBottom: 8 }}>
+              {[1, 2, 3, 6].map(n => (
+                <button key={n} style={{ ...s.rangoBtn, background: form.cantidad === n ? '#111' : '#fff', color: form.cantidad === n ? '#fff' : '#111', border: `2px solid ${form.cantidad === n ? '#111' : '#e8e8e8'}` }} onClick={() => update('cantidad', n)}>{n}</button>
+              ))}
+            </div>
+            <p style={{ fontSize: 11, color: '#888', marginBottom: 16 }}>Solo afecta los <strong>títulos sugeridos</strong> (singular/plural coherente). La promo 6×5 y los productos los toma del carrito real.</p>
+          </>}
           <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
             <input style={{ ...s.input, marginBottom: 0, flex: 1 }} placeholder="Buscar título..." value={tituloSearch} onChange={e => setTituloSearch(e.target.value)} />
             <button style={s.sugerirBtn} disabled={sugiriendo === 'titulo'} onClick={() => sugerir('titulo')}>{sugiriendo === 'titulo' ? '…' : '✨ Sugerir nuevos'}</button>
