@@ -245,7 +245,7 @@ export default function App() {
             { label: "Canal", value: result.canal === 'lgr' ? 'LGR · base propia (AWS)' : (result.canal === 'mailchimp' ? 'Mailchimp' : 'Brevo') },
             { label: "Campaña", value: result.campaignName },
             result.isDraft || !result.scheduleTime ? null : { label: "Programada", value: new Date(result.scheduleTime).toLocaleString('es-AR') },
-            result.testEmail ? { label: "Prueba enviada a", value: result.testEmail } : null,
+            result.testEmail ? { label: "Prueba", value: result.testSent === false ? `✗ falló (${result.testEmail})` : `✓ enviada a ${result.testEmail}` } : null,
             { label: "Productos", value: `${result.productsFound} productos` },
           ].filter(Boolean).map((item, i) => (
             <div key={i} style={s.summaryRow}>
@@ -254,6 +254,9 @@ export default function App() {
             </div>
           ))}
         </div>
+        {result.testSent === false && result.testError && (
+          <div style={{ ...s.errorBox, marginTop: 12 }}>No salió el email de prueba: {result.testError.slice(0, 240)}</div>
+        )}
         {result.brevoUrl && <a href={result.brevoUrl} target="_blank" rel="noopener noreferrer" style={s.mcLink}>Ver en Brevo →</a>}
         {result.mailchimpUrl && <a href={result.mailchimpUrl} target="_blank" rel="noopener noreferrer" style={s.mcLink}>Ver en Mailchimp →</a>}
         {result.lgrUrl && <a href={result.lgrUrl} target="_blank" rel="noopener noreferrer" style={s.mcLink}>Ver en LGR →</a>}

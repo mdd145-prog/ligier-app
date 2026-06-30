@@ -858,8 +858,24 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Error Brevo crear campaña', detail: JSON.stringify(campaign) });
     }
 
-    // Envío de prueba al emailPrueba (siempre, igual que con Mailchimp).
+    // Envío de prueba al emailPrueba. Brevo exige que el destinatario sea un
+    // contacto existente — si no, /sendTest devuelve 400. Lo damos de alta
+    // antes (idempotente: si ya existe, Brevo devuelve 400 con code
+    // 'duplicate_parameter' y lo ignoramos).
     const testEmail = emailPrueba || 'mdd145@gmail.com';
+    try {
+      const cRes = await fetch(`${brevoBase}/contacts`, {
+        method: 'POST', headers: brevoHeaders,
+        body: JSON.stringify({ email: testEmail, updateEnabled: true }),
+      });
+      if (!cRes.ok) {
+        const cBody = await cRes.json().catch(() => ({}));
+        if (cBody.code !== 'duplicate_parameter') {
+          console.warn('[brevo] no se pudo crear contacto de prueba', cBody);
+        }
+      }
+    } catch (e) { console.warn('[brevo] error creando contacto de prueba', e.message); }
+
     const testRes = await fetch(`${brevoBase}/emailCampaigns/${campaign.id}/sendTest`, {
       method: 'POST', headers: brevoHeaders,
       body: JSON.stringify({ emailTo: [testEmail] }),
