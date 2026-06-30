@@ -30,9 +30,7 @@ const PROGRESS_STEPS = [
 ];
 
 export default function App() {
-  const [view, setView] = useState("home"); // "home" | "create" | "analysis"
-  const [analysis, setAnalysis] = useState(null);
-  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [view, setView] = useState("home"); // "home" | "create"
   const [step, setStep] = useState(0);
   const [form, setForm] = useState(initialForm());
   const [loading, setLoading] = useState(false);
@@ -47,6 +45,9 @@ export default function App() {
   const [listasLgr, setListasLgr] = useState(null);
   const [preview, setPreview] = useState(null); // {html, subject, preheader, cartTotal, productsFound}
   const [aprobando, setAprobando] = useState(false);
+  const [bannerSource, setBannerSource] = useState("file"); // "file" | "url"
+  const [bannerUploading, setBannerUploading] = useState(false);
+  const [bannerUploadError, setBannerUploadError] = useState(null);
 
   function initialForm() {
     return {
@@ -143,6 +144,25 @@ export default function App() {
 
   const buildPayload = (dryRun) => ({ ...form, dryRun });
 
+  const uploadBanner = async (file) => {
+    if (!file) return;
+    setBannerUploadError(null);
+    setBannerUploading(true);
+    try {
+      const res = await fetch('/api/upload-banner', {
+        method: 'POST',
+        headers: { 'Content-Type': file.type, 'x-filename': file.name },
+        body: file,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'No se pudo subir la imagen');
+      update('bannerImageUrl', data.url);
+    } catch (err) {
+      setBannerUploadError(err.message);
+    }
+    setBannerUploading(false);
+  };
+
   // ── Paso final: generar vista previa (dryRun) ──
   const generarPreview = async () => {
     setLoading(true); setError(null); setLoadingStep(0); setPreview(null);
@@ -179,19 +199,6 @@ export default function App() {
     setAprobando(false);
   };
 
-  const loadAnalysis = async () => {
-    setView("analysis");
-    setAnalysisLoading(true);
-    try {
-      const res = await fetch('/api/analyze');
-      const data = await res.json();
-      setAnalysis(data);
-    } catch (err) {
-      setAnalysis({ error: err.message });
-    }
-    setAnalysisLoading(false);
-  };
-
   const reset = () => {
     setResult(null); setStep(0); setError(null); setTituloSearch(""); setView("home");
     setForm(initialForm()); setExtra({ titulo: [], bajada: [], subject: [], preheader: [] });
@@ -212,58 +219,6 @@ export default function App() {
           <span style={{ fontSize: 16, fontWeight: 700, color: '#111', display: 'block', marginBottom: 4 }}>Crear campaña</span>
           <span style={{ fontSize: 12, color: '#888' }}>Armá, previsualizá y programá un email</span>
         </button>
-        <button style={s.homeBtn} onClick={loadAnalysis}>
-          <span style={{ fontSize: 28, marginBottom: 8, display: 'block' }}>📊</span>
-          <span style={{ fontSize: 16, fontWeight: 700, color: '#111', display: 'block', marginBottom: 4 }}>Análisis de campañas</span>
-          <span style={{ fontSize: 12, color: '#888' }}>Qué funciona y qué optimizar</span>
-        </button>
-      </div>
-    </div>
-  );
-
-  // ANALYSIS SCREEN (sin cambios v2)
-  if (view === "analysis") return (
-    <div style={s.container}>
-      <div style={s.header}><div style={s.logo}>LIGIER</div><div style={s.sub}>Análisis de campañas</div></div>
-      <div style={{ padding: 16 }}>
-        {analysisLoading && <div style={{ ...s.card, textAlign: 'center', padding: 48 }}><div style={s.spinner} /><p style={s.loadingText}>Analizando campañas...</p></div>}
-        {!analysisLoading && analysis?.error && <div style={s.errorBox}>{analysis.error}</div>}
-        {!analysisLoading && analysis?.message && <div style={s.card}><p style={{ fontSize: 14, color: '#888', textAlign: 'center' }}>{analysis.message}</p></div>}
-        {!analysisLoading && analysis?.overall && <>
-          <div style={s.card}>
-            <h2 style={s.stepTitle}>Resumen general</h2>
-            <div style={s.summaryBox}>
-              <div style={s.summaryRow}><span style={s.summaryLabel}>Campañas</span><span style={s.summaryValue}>{analysis.overall.campañas}</span></div>
-              <div style={s.summaryRow}><span style={s.summaryLabel}>Apertura prom.</span><span style={s.summaryValue}>{analysis.overall.apertura_promedio}%</span></div>
-              <div style={s.summaryRow}><span style={s.summaryLabel}>Click prom.</span><span style={s.summaryValue}>{analysis.overall.click_promedio}%</span></div>
-              {analysis.overall.ctor != null && <div style={s.summaryRow}><span style={s.summaryLabel}>CTOR</span><span style={s.summaryValue}>{analysis.overall.ctor}%</span></div>}
-              <div style={s.summaryRow}><span style={s.summaryLabel}>Ventas</span><span style={s.summaryValue}>${analysis.overall.revenue_total.toLocaleString('es-AR')}</span></div>
-              {analysis.overall.revenue_por_email != null && <div style={s.summaryRow}><span style={s.summaryLabel}>Revenue / email</span><span style={s.summaryValue}>${analysis.overall.revenue_por_email.toLocaleString('es-AR')}</span></div>}
-              <div style={s.summaryRow}><span style={s.summaryLabel}>Órdenes</span><span style={s.summaryValue}>{analysis.overall.ordenes_total}</span></div>
-              {analysis.overall.bounce_rate != null && <div style={s.summaryRow}><span style={s.summaryLabel}>Rebote</span><span style={s.summaryValue}>{analysis.overall.bounce_rate}%</span></div>}
-              {analysis.overall.unsub_rate != null && <div style={s.summaryRow}><span style={s.summaryLabel}>Desuscripción</span><span style={s.summaryValue}>{analysis.overall.unsub_rate}%</span></div>}
-              {analysis.overall.abuse_rate != null && <div style={s.summaryRow}><span style={s.summaryLabel}>Quejas spam</span><span style={s.summaryValue}>{analysis.overall.abuse_rate}%</span></div>}
-            </div>
-          </div>
-          {analysis.insights?.length > 0 && <div style={s.card}>
-            <h2 style={s.stepTitle}>Qué aprendimos</h2>
-            {analysis.insights.map((ins, i) => (
-              <div key={i} style={{ padding: '12px 14px', background: '#f4f1ec', borderRadius: 2, marginBottom: 8, fontSize: 13, color: '#111', lineHeight: 1.5 }}>💡 {ins}</div>
-            ))}
-          </div>}
-          {analysis.byTipo?.length > 0 && <div style={s.card}>
-            <h2 style={s.stepTitle}>Por tipo de email</h2>
-            <div style={s.summaryBox}>
-              {analysis.byTipo.map((t, i) => (
-                <div key={i} style={s.summaryRow}>
-                  <span style={{ ...s.summaryLabel, textTransform: 'capitalize' }}>{t.name}</span>
-                  <span style={{ fontSize: 11, color: '#888' }}>{t.open_rate}% ap · {t.ctor != null ? `${t.ctor}% ctor` : `${t.click_rate}% clk`} · ${t.revenue.toLocaleString('es-AR')}</span>
-                </div>
-              ))}
-            </div>
-          </div>}
-        </>}
-        <button style={{ ...s.resetBtn, marginTop: 8 }} onClick={() => setView("home")}>← Volver al inicio</button>
       </div>
     </div>
   );
@@ -340,12 +295,39 @@ export default function App() {
         {/* STEP 1 — Banner (cuando tipo=banner) */}
         {step === 1 && form.tipo === 'banner' && <>
           <h2 style={s.stepTitle}>Banner del email</h2>
-          <label style={s.label}>URL de la imagen</label>
-          <input style={s.input} type="url" placeholder="https://i.imgur.com/abc.jpg" value={form.bannerImageUrl} onChange={e => update('bannerImageUrl', e.target.value)} />
-          <p style={{ fontSize: 11, color: '#888', marginTop: -8, marginBottom: 16 }}>Subí la imagen a Mailchimp / Imgur / Drive público y pegá la URL acá. Ancho recomendado: 600px.</p>
+          <label style={s.label}>Imagen del banner</label>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+            {[
+              { id: 'file', label: 'Subir archivo' },
+              { id: 'url', label: 'Pegar URL' },
+            ].map(o => (
+              <button key={o.id} onClick={() => setBannerSource(o.id)} style={{
+                flex: 1, padding: '10px 8px', borderRadius: 2, cursor: 'pointer', fontSize: 12, fontWeight: 700, letterSpacing: 0.5,
+                background: bannerSource === o.id ? '#111' : '#fff', color: bannerSource === o.id ? '#fff' : '#111',
+                border: `2px solid ${bannerSource === o.id ? '#111' : '#e8e8e8'}`,
+              }}>{o.label}</button>
+            ))}
+          </div>
+          {bannerSource === 'file' && <>
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              onChange={e => uploadBanner(e.target.files?.[0])}
+              disabled={bannerUploading}
+              style={{ width: '100%', padding: 12, border: '1.5px solid #e8e8e8', borderRadius: 2, fontSize: 13, boxSizing: 'border-box', background: '#fff', marginBottom: 8 }}
+            />
+            {bannerUploading && <p style={{ fontSize: 12, color: '#888', marginBottom: 12 }}>Subiendo imagen…</p>}
+            {bannerUploadError && <div style={s.errorBox}>{bannerUploadError}</div>}
+            <p style={{ fontSize: 11, color: '#888', marginBottom: 16 }}>JPG / PNG / WEBP / GIF · máx 5 MB · ancho recomendado 600px. Se sube a Vercel Blob (URL pública estable).</p>
+          </>}
+          {bannerSource === 'url' && <>
+            <input style={s.input} type="url" placeholder="https://i.imgur.com/abc.jpg" value={form.bannerImageUrl} onChange={e => update('bannerImageUrl', e.target.value)} />
+            <p style={{ fontSize: 11, color: '#888', marginTop: -8, marginBottom: 16 }}>Subí la imagen a Mailchimp / Imgur / Drive público y pegá la URL acá. Ancho recomendado: 600px.</p>
+          </>}
           {form.bannerImageUrl && (
             <div style={{ marginBottom: 16, padding: 8, background: '#f4f1ec', borderRadius: 2 }}>
               <img src={form.bannerImageUrl} alt="Preview" style={{ width: '100%', maxHeight: 200, objectFit: 'contain', display: 'block' }} onError={e => e.target.style.display = 'none'} />
+              <p style={{ fontSize: 10, color: '#888', wordBreak: 'break-all', marginTop: 6 }}>{form.bannerImageUrl}</p>
             </div>
           )}
           <label style={s.label}>Texto del botón (CTA)</label>
@@ -401,13 +383,13 @@ export default function App() {
         {/* STEP 3 — Título / bajada / subject / preheader, todos con "sugerir nuevos" */}
         {step === 3 && <>
           <h2 style={s.stepTitle}>Título del email</h2>
-          <label style={s.label}>¿Cuántas botellas vas a ofrecer?</label>
+          <label style={s.label}>¿Cuántas botellas mencionar en el título?</label>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginBottom: 8 }}>
             {[1, 2, 3, 6].map(n => (
               <button key={n} style={{ ...s.rangoBtn, background: form.cantidad === n ? '#111' : '#fff', color: form.cantidad === n ? '#fff' : '#111', border: `2px solid ${form.cantidad === n ? '#111' : '#e8e8e8'}` }} onClick={() => update('cantidad', n)}>{n}</button>
             ))}
           </div>
-          <p style={{ fontSize: 11, color: '#888', marginBottom: 16 }}>El botón ✨ sugiere títulos pensados para {form.cantidad} {form.cantidad === 1 ? 'botella' : 'botellas'}.</p>
+          <p style={{ fontSize: 11, color: '#888', marginBottom: 16 }}>Solo afecta los <strong>títulos sugeridos</strong> (singular/plural coherente). La promo 6×5 y los productos los toma del carrito real.</p>
           <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
             <input style={{ ...s.input, marginBottom: 0, flex: 1 }} placeholder="Buscar título..." value={tituloSearch} onChange={e => setTituloSearch(e.target.value)} />
             <button style={s.sugerirBtn} disabled={sugiriendo === 'titulo'} onClick={() => sugerir('titulo')}>{sugiriendo === 'titulo' ? '…' : '✨ Sugerir nuevos'}</button>
